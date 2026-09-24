@@ -54,15 +54,15 @@ flowchart LR
 
 | 字段 | ES 类型 | 是否可搜索 | 说明 |
 |---|---|---|---|
-| `id` | long | 精确查询 | 活动 ID |
+| `id` | keyword | 精确查询 | 活动 UUID，作为文档 ID |
 | `title` | text | 全文搜索 | 活动标题 |
 | `title_keyword` | keyword | 精确/排序 | 标题聚合 |
 | `description` | text | 全文搜索 | 活动简介和详情 |
-| `category_id` | long | 过滤 | 分类 ID |
+| `category_id` | keyword | 过滤 | 分类外部标识 |
 | `category_name` | keyword | 过滤/聚合 | 分类名称 |
-| `tag_ids` | long | 过滤 | 标签 ID 列表 |
+| `tag_ids` | keyword | 过滤 | 标签外部标识列表 |
 | `tag_names` | text/keyword | 搜索/聚合 | 标签名称 |
-| `organizer_id` | long | 过滤 | 组织者 ID |
+| `organizer_id` | keyword | 过滤 | 组织者 UUID |
 | `organizer_name` | text/keyword | 搜索/聚合 | 组织者名称 |
 | `organizer_avatar` | keyword/index false | 不搜索 | 组织者头像 |
 | `location` | text/keyword | 搜索/聚合 | 地点名称 |
@@ -84,6 +84,8 @@ flowchart LR
 | `updated_at` | date | 排序/版本 | 更新时间 |
 
 ### 4.2 中文分词
+
+Mapping 中的日期字段统一接收和返回 Unix 毫秒时间戳；搜索服务负责将 MySQL `DATETIME(3)` 转换为毫秒值。
 
 自托管 Elasticsearch 可安装 IK Analysis 插件：
 

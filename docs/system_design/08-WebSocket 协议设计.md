@@ -67,7 +67,7 @@ sequenceDiagram
 {
   "type": "auth",
   "message_id": "client-message-id",
-  "timestamp": 1710000000000,
+  "timestamp": 1767232800000,
   "data": {
     "token": "<access_token>"
   }
@@ -80,9 +80,9 @@ sequenceDiagram
 {
   "type": "auth_success",
   "message_id": "server-message-id",
-  "timestamp": 1710000000100,
+  "timestamp": 1767232800100,
   "data": {
-    "user_id": 10001
+    "user_id": "user-uuid"
   }
 }
 ```
@@ -93,7 +93,7 @@ sequenceDiagram
 {
   "type": "auth_failed",
   "message_id": "server-message-id",
-  "timestamp": 1710000000100,
+  "timestamp": 1767232800100,
   "data": {
     "code": 101401,
     "message": "认证失败"
@@ -117,7 +117,7 @@ sequenceDiagram
 {
   "type": "event_name",
   "message_id": "unique-message-id",
-  "timestamp": 1710000000000,
+  "timestamp": 1767232800000,
   "trace_id": "trace-id",
   "data": {}
 }
@@ -129,7 +129,7 @@ sequenceDiagram
 |---|---|---|
 | `type` | 是 | 事件类型 |
 | `message_id` | 是 | 消息唯一 ID，客户端或服务端生成 |
-| `timestamp` | 是 | 毫秒级时间戳 |
+| `timestamp` | 是 | Unix 毫秒时间戳 |
 | `trace_id` | 否 | 链路追踪 ID |
 | `data` | 否 | 事件数据 |
 
@@ -141,7 +141,7 @@ sequenceDiagram
 {
   "type": "ping",
   "message_id": "ping-001",
-  "timestamp": 1710000000000
+  "timestamp": 1767232800000
 }
 ```
 
@@ -151,7 +151,7 @@ sequenceDiagram
 {
   "type": "pong",
   "message_id": "pong-001",
-  "timestamp": 1710000000000
+  "timestamp": 1767232800000
 }
 ```
 
@@ -171,7 +171,7 @@ sequenceDiagram
 {
   "type": "send_message",
   "message_id": "client-msg-001",
-  "timestamp": 1710000000000,
+  "timestamp": 1767232800000,
   "data": {
     "group_id": "group-uuid",
     "msg_type": 1,
@@ -186,7 +186,7 @@ sequenceDiagram
 {
   "type": "send_message",
   "message_id": "client-msg-002",
-  "timestamp": 1710000000000,
+  "timestamp": 1767232800000,
   "data": {
     "group_id": "group-uuid",
     "msg_type": 2,
@@ -200,7 +200,7 @@ sequenceDiagram
 1. 校验用户是否属于该群；
 2. 消息先落 MySQL；
 3. 返回 ACK；
-4. 通过 Kafka 或 Redis 广播到其他实例；
+4. 通过 Kafka 的实例独立消费者组广播到其他实例；
 5. 向群内其他成员推送 `new_message`。
 
 ### 7.2 标记已读
@@ -209,7 +209,7 @@ sequenceDiagram
 {
   "type": "mark_read",
   "message_id": "client-read-001",
-  "timestamp": 1710000000000,
+  "timestamp": 1767232800000,
   "data": {
     "group_id": "group-uuid",
     "message_id": "message-uuid"
@@ -227,7 +227,7 @@ sequenceDiagram
 {
   "type": "ack",
   "message_id": "server-ack-001",
-  "timestamp": 1710000000000,
+  "timestamp": 1767232800000,
   "data": {
     "client_message_id": "client-msg-001",
     "server_message_id": "server-msg-001"
@@ -243,16 +243,16 @@ ACK 用于确认客户端消息已被服务端接收并完成必要持久化。
 {
   "type": "new_message",
   "message_id": "server-msg-001",
-  "timestamp": 1710000000000,
+  "timestamp": 1767232800000,
   "data": {
     "message_id": "server-msg-001",
     "group_id": "group-uuid",
-    "sender_id": 10001,
+    "sender_id": "user-uuid",
     "sender_name": "张三",
     "sender_avatar": "https://example.com/avatar.jpg",
     "msg_type": 1,
     "content": "你好",
-    "created_at": 1710000000000
+    "created_at": 1767232800000
   }
 }
 ```
@@ -263,7 +263,7 @@ ACK 用于确认客户端消息已被服务端接收并完成必要持久化。
 {
   "type": "notification",
   "message_id": "notification-001",
-  "timestamp": 1710000000000,
+  "timestamp": 1767232800000,
   "data": {
     "notification_id": "notification-uuid",
     "notification_type": "system",
@@ -279,7 +279,7 @@ ACK 用于确认客户端消息已被服务端接收并完成必要持久化。
 {
   "type": "verify_progress",
   "message_id": "verify-001",
-  "timestamp": 1710000000000,
+  "timestamp": 1767232800000,
   "data": {
     "verification_id": "verification-uuid",
     "status": "pending_confirm",
@@ -295,7 +295,7 @@ ACK 用于确认客户端消息已被服务端接收并完成必要持久化。
 {
   "type": "registration_status_changed",
   "message_id": "registration-001",
-  "timestamp": 1710000000000,
+  "timestamp": 1767232800000,
   "data": {
     "registration_id": "registration-uuid",
     "activity_id": "activity-uuid",
@@ -314,7 +314,7 @@ ACK 用于确认客户端消息已被服务端接收并完成必要持久化。
 {
   "type": "error",
   "message_id": "error-001",
-  "timestamp": 1710000000000,
+  "timestamp": 1767232800000,
   "data": {
     "code": 104003,
     "message": "无权访问该群"
@@ -380,12 +380,7 @@ ACK 用于确认客户端消息已被服务端接收并完成必要持久化。
 
 ### 11.2 跨实例广播
 
-可选择：
-
-- Kafka：可靠、可追踪，适合作为主广播机制；
-- Redis Pub/Sub：低延迟、简单，但消息不持久。
-
-新系统推荐 Kafka 作为主事件通道，Redis 用于在线状态和连接定位。
+Kafka 作为主广播机制，Redis 只用于在线状态、连接定位和房间关系。每个运行实例使用独立的消费者组，例如 `campushub.chat-delivery.{instance_id}`，确保每个实例都能收到全部聊天投递事件；同一实例内的消费者仍可通过组内分工扩展。
 
 ```mermaid
 flowchart LR

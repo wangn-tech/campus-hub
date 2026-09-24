@@ -6,6 +6,8 @@
 
 ## 2. 通用约定
 
+本文是新系统 HTTP 接口的唯一契约。`02-前端接口清单.md` 只记录旧接口来源，`18-前端更新.md` 只记录客户端迁移动作；新接口路径、字段、状态和响应结构以本文为准。
+
 ### 2.1 URL 前缀
 
 ```text
@@ -21,8 +23,10 @@
 
 - 请求体默认使用 `application/json`；
 - 文件上传使用 `multipart/form-data`；
-- 时间字段在数据库中使用 `DATETIME(3)`；
-- API 响应中的时间可同时支持 RFC3339 和 Unix 时间戳，具体在 DTO 中固定；
+- API 对外时间字段统一使用 Unix 毫秒时间戳，例如 `1767232800000`；
+- 数据库时间字段使用 `DATETIME(3)`，由服务端负责与 Unix 毫秒时间戳互相转换；
+- 时间戳使用有符号 64 位整数语义，按 UTC 计算，不携带时区；Go 后端使用 `time.UnixMilli` 等价逻辑转换，客户端使用毫秒精度日期 API 转换展示；
+- 资源路径中的 `{id}` 统一表示外部 UUID 字符串，内部自增 ID 不暴露给客户端；
 - 所有接口使用 UTF-8 编码。
 
 ### 2.3 鉴权
@@ -80,6 +84,8 @@ Authorization: Bearer <access_token>
   }
 }
 ```
+
+所有分页接口均使用 `items` 和 `pagination`，不再使用 `list`、`records` 或嵌套的 `data.list`。
 
 ### 2.6 错误码分段
 
@@ -283,7 +289,16 @@ HTTP 状态码仍应正确返回，例如 400、401、403、404、429、500。
 | GET | `/api/v1/captcha/config` | 获取验证码配置 | 否 |
 | GET | `/api/v1/captcha` | 获取验证码图片或题目 | 否 |
 | POST | `/api/v1/captcha/verify` | 校验验证码 | 否 |
-| GET | `/api/v1/email-codes` | 发送邮箱验证码 | 按场景判断 |
+| POST | `/api/v1/email-codes` | 发送邮箱验证码 | 按场景判断 |
+
+邮箱验证码请求体至少包含邮箱和场景：
+
+```json
+{
+  "email": "user@example.com",
+  "scene": "register"
+}
+```
 
 邮箱验证码场景：
 
@@ -291,11 +306,11 @@ HTTP 状态码仍应正确返回，例如 400、401、403、404、429、500。
 - `forgot_password`；
 - `logoff`。
 
-旧路径映射：
+旧路径映射仅用于迁移记录；新客户端不得继续使用带副作用的 GET 请求：
 
-- `/api/v1/qq_code/register` → `/api/v1/email-codes?scene=register`；
-- `/api/v1/qq_code/forgot_password` → `/api/v1/email-codes?scene=forgot_password`；
-- `/api/v1/qq_code/delete_user` → `/api/v1/email-codes?scene=logoff`。
+- `GET /api/v1/qq_code/register` → `POST /api/v1/email-codes`，请求体 `scene=register`；
+- `GET /api/v1/qq_code/forgot_password` → `POST /api/v1/email-codes`，请求体 `scene=forgot_password`；
+- `GET /api/v1/qq_code/delete_user` → `POST /api/v1/email-codes`，请求体 `scene=logoff`。
 
 ## 14. 通知接口
 

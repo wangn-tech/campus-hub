@@ -47,10 +47,10 @@ flowchart LR
 | Topic | Key | 主要事件 | 消费者组 |
 |---|---|---|---|
 | `campushub.activity.events.v1` | `activity_id` | 活动创建、更新、状态变化、取消、删除 | `campushub.search-indexer`、`campushub.statistics-worker` |
-| `campushub.registration.events.v1` | `registration_id` | 报名申请、审批通过、拒绝、超时、取消 | `campushub.notification-worker`、`campushub.chat-delivery` |
+| `campushub.registration.events.v1` | `registration_id` | 报名申请、审批通过、拒绝、超时、取消 | `campushub.notification-worker`、`campushub.chat-delivery.{instance_id}` |
 | `campushub.ticket.events.v1` | `ticket_id` | 票据生成、核销、作废、过期 | `campushub.notification-worker`、`campushub.audit-worker` |
 | `campushub.notification.events.v1` | `user_id` | 通知创建、已读、推送 | `campushub.notification-worker` |
-| `campushub.chat.events.v1` | `group_id` | 群消息、成员变化、未读更新 | `campushub.chat-delivery` |
+| `campushub.chat.events.v1` | `group_id` | 群消息、成员变化、未读更新 | `campushub.chat-delivery.{instance_id}` |
 | `campushub.file.events.v1` | `file_id` | 文件上传完成、审核、清理 | `campushub.file-worker` |
 | `campushub.system.audit.v1` | `operator_id` | 登录、权限、管理操作审计 | `campushub.audit-worker` |
 
@@ -86,9 +86,9 @@ campushub.{domain}.events.v1
   "event_id": "uuid",
   "event_type": "activity.created",
   "event_version": 1,
-  "event_time": "2026-01-01T10:00:00.000+08:00",
+  "event_time": 1767232800000,
   "aggregate_type": "activity",
-  "aggregate_id": "10001",
+  "aggregate_id": "activity-uuid",
   "trace_id": "trace-id",
   "producer": "campushub-backend",
   "payload": {}
@@ -108,6 +108,8 @@ campushub.{domain}.events.v1
 | `trace_id` | 链路追踪 ID |
 | `producer` | 生产者名称 |
 | `payload` | 事件数据 |
+
+`event_time` 和 `payload` 中的时间字段统一使用 Unix 毫秒时间戳；数据库内部的 `DATETIME(3)` 只在服务端转换，不直接写入事件。
 
 ## 6. 事件类型
 
@@ -191,7 +193,7 @@ Relay 可以：
 |---|---|
 | `campushub.search-indexer` | 写入或更新 Elasticsearch 活动索引 |
 | `campushub.notification-worker` | 发送通知、更新未读计数 |
-| `campushub.chat-delivery` | 将消息投递到 WebSocket |
+| `campushub.chat-delivery.{instance_id}` | 将消息投递到 WebSocket；每个实例使用独立消费者组接收全部聊天事件 |
 | `campushub.statistics-worker` | 更新浏览量、标签统计和活动统计 |
 | `campushub.audit-worker` | 写入审计日志 |
 | `campushub.file-worker` | 文件处理和清理 |
@@ -302,7 +304,7 @@ campushub.{domain}.events.v1.dlq
 1. 发送方通过 WebSocket 发送消息；
 2. 服务端持久化消息；
 3. 发布聊天事件；
-4. Chat Delivery 消费者按群投递到各实例连接；
+4. 每个实例的 Chat Delivery 消费者组按群投递到本实例连接；
 5. 在线用户收到 `new_message`。
 
 ## 12. 监控指标
