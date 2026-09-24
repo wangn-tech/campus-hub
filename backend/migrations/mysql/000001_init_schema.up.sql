@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS schema_migrations_guard (
+    id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+    created_at DATETIME(3) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+INSERT INTO schema_migrations_guard (id, created_at)
+VALUES (1, CURRENT_TIMESTAMP(3))
+ON DUPLICATE KEY UPDATE id = id;

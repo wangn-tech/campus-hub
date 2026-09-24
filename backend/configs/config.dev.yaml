@@ -1,0 +1,44 @@
+app:
+  name: campushub
+  env: dev
+  timezone: UTC
+  instance_id: local
+http:
+  host: 127.0.0.1
+  port: 8080
+  read_timeout: 15s
+  write_timeout: 15s
+  idle_timeout: 60s
+  shutdown_timeout: 30s
+  allowed_origins:
+    - http://localhost:5173
+mysql:
+  host: 127.0.0.1
+  port: 13306
+  username: campushub
+  password: change-me
+  database: campushub
+redis:
+  host: 127.0.0.1
+  port: 16379
+  password: campushub_dev
+  database: 0
+kafka:
+  brokers:
+    - 127.0.0.1:19092
+  consumer_group: campushub-backend
+  chat_delivery_group_prefix: campushub.chat-delivery
+elasticsearch:
+  addresses:
+    - http://127.0.0.1:19200
+storage:
+  driver: local
+  endpoint: ""
+  bucket: campushub
+  use_path_style: true
+jwt:
+  issuer: campushub
+  access_secret: dev-access-secret-change-me
+  access_ttl: 2h
+  refresh_secret: dev-refresh-secret-change-me
+  refresh_ttl: 720h

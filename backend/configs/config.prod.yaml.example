@@ -1,0 +1,37 @@
+app:
+  name: campushub
+  env: prod
+  timezone: UTC
+  instance_id: replace-me
+http:
+  host: 0.0.0.0
+  port: 8080
+  allowed_origins: []
+mysql:
+  host: mysql
+  port: 3306
+  username: campushub
+  password: ""
+  database: campushub
+redis:
+  host: redis
+  port: 6379
+kafka:
+  brokers:
+    - kafka:9092
+  consumer_group: campushub-backend
+  chat_delivery_group_prefix: campushub.chat-delivery
+elasticsearch:
+  addresses:
+    - http://elasticsearch:9200
+storage:
+  driver: minio
+  endpoint: minio:9000
+  access_key: ""
+  secret_key: ""
+  bucket: campushub
+  use_path_style: true
+jwt:
+  issuer: campushub
+  access_secret: ""
+  refresh_secret: ""

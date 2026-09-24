@@ -1,0 +1,17 @@
+DROP TABLE IF EXISTS idempotency_records;
+DROP TABLE IF EXISTS outbox_events;
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS check_ins;
+DROP TABLE IF EXISTS tickets;
+DROP TABLE IF EXISTS activity_registrations;
+DROP TABLE IF EXISTS activity_tag_relations;
+DROP TABLE IF EXISTS activities;
+DROP TABLE IF EXISTS user_interest_relations;
+DROP TABLE IF EXISTS tag_scopes;
+DROP TABLE IF EXISTS tags;
+DROP TABLE IF EXISTS categories;
+DROP TABLE IF EXISTS user_credit_logs;
+DROP TABLE IF EXISTS user_credit_profiles;
+DROP TABLE IF EXISTS user_roles;
+DROP TABLE IF EXISTS roles;
+DROP TABLE IF EXISTS users;
