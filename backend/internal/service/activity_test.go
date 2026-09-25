@@ -3,6 +3,8 @@ package service
 import (
 	"testing"
 	"time"
+
+	"github.com/wangn-tech/campus-hub/internal/model"
 )
 
 func TestNormalizePage(t *testing.T) {
@@ -94,5 +96,37 @@ func TestUniqueHelpers(t *testing.T) {
 	ids := uniqueUint64([]uint64{1, 2, 1, 3})
 	if len(ids) != 3 {
 		t.Fatalf("uniqueUint64 = %v", ids)
+	}
+}
+
+func TestActivityStatusRules(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      model.ActivityStatus
+		editable    bool
+		cancellable bool
+		reviewable  bool
+	}{
+		{name: "draft", status: model.ActivityDraft, editable: true, cancellable: true, reviewable: false},
+		{name: "pending review", status: model.ActivityPendingReview, editable: false, cancellable: true, reviewable: true},
+		{name: "published", status: model.ActivityPublished, editable: false, cancellable: true, reviewable: false},
+		{name: "ongoing", status: model.ActivityOngoing, editable: false, cancellable: true, reviewable: false},
+		{name: "finished", status: model.ActivityFinished, editable: false, cancellable: false, reviewable: false},
+		{name: "rejected", status: model.ActivityRejected, editable: true, cancellable: false, reviewable: false},
+		{name: "cancelled", status: model.ActivityCancelled, editable: false, cancellable: false, reviewable: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status := uint8(tc.status)
+			if got := isEditableActivityStatus(status); got != tc.editable {
+				t.Fatalf("isEditableActivityStatus(%d) = %v, want %v", status, got, tc.editable)
+			}
+			if got := canCancelActivity(status); got != tc.cancellable {
+				t.Fatalf("canCancelActivity(%d) = %v, want %v", status, got, tc.cancellable)
+			}
+			if got := canReviewActivity(status); got != tc.reviewable {
+				t.Fatalf("canReviewActivity(%d) = %v, want %v", status, got, tc.reviewable)
+			}
+		})
 	}
 }
