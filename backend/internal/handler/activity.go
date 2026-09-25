@@ -56,7 +56,7 @@ func (h *ActivityHandler) List(c *gin.Context) {
 		activityError(c, err)
 		return
 	}
-	httpx.Success(c, pageResponse(items, page, pageSize, total))
+	httpx.Success(c, pageOf(items, page, pageSize, total))
 }
 
 func (h *ActivityHandler) Search(c *gin.Context) {
@@ -86,7 +86,7 @@ func (h *ActivityHandler) Search(c *gin.Context) {
 		activityError(c, err)
 		return
 	}
-	httpx.Success(c, pageResponse(items, page, pageSize, total))
+	httpx.Success(c, pageOf(items, page, pageSize, total))
 }
 
 func (h *ActivityHandler) Detail(c *gin.Context) {
@@ -110,7 +110,7 @@ func (h *ActivityHandler) MyCreated(c *gin.Context) {
 		activityError(c, err)
 		return
 	}
-	httpx.Success(c, pageResponse(items, page, pageSize, total))
+	httpx.Success(c, pageOf(items, page, pageSize, total))
 }
 
 func (h *ActivityHandler) Create(c *gin.Context) {
@@ -201,14 +201,7 @@ func (h *ActivityHandler) transition(c *gin.Context, apply func(*model.User) err
 }
 
 func (h *ActivityHandler) currentUser(c *gin.Context) (*model.User, error) {
-	return h.users.Current(c.Request.Context(), middleware.UserUUID(c))
-}
-
-func pageResponse(items []service.ActivityView, page, pageSize int, total int64) httpx.Page[service.ActivityView] {
-	return httpx.Page[service.ActivityView]{
-		Items:      items,
-		Pagination: httpx.Pagination{Page: page, PageSize: pageSize, Total: total},
-	}
+	return currentUser(c, h.users)
 }
 
 func queryInt(c *gin.Context, key string, fallback int) int {

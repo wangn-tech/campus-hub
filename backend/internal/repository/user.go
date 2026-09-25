@@ -2,11 +2,15 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/wangn-tech/campus-hub/internal/model"
 	"gorm.io/gorm"
 )
+
+// defaultCreditScore is used when a user has no credit profile row yet.
+const defaultCreditScore = 100
 
 type UserRepository struct{ db *gorm.DB }
 
@@ -49,6 +53,23 @@ func (r *UserRepository) HasRole(ctx context.Context, userID uint64, code string
 		Where("user_roles.user_id = ? AND roles.code = ?", userID, code).
 		Count(&count).Error
 	return count > 0, err
+}
+
+// CreditScore returns the user's credit score, falling back to the default when
+// the profile row does not exist yet.
+func (r *UserRepository) CreditScore(ctx context.Context, userID uint64) (int, error) {
+	var profile struct{ Score int }
+	err := r.db.WithContext(ctx).Table("user_credit_profiles").
+		Select("score").
+		Where("user_id = ?", userID).
+		Take(&profile).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return defaultCreditScore, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return profile.Score, nil
 }
 
 func (r *UserRepository) UpdateLastLogin(ctx context.Context, userID uint64, at time.Time) error {

@@ -99,6 +99,8 @@ func run() error {
 	tagRepository := repository.NewTagRepository(db)
 	categoryRepository := repository.NewCategoryRepository(db)
 	activityRepository := repository.NewActivityRepository(db)
+	registrationRepository := repository.NewRegistrationRepository(db)
+	ticketRepository := repository.NewTicketRepository(db)
 	verificationRepository := repository.NewVerificationRepository(db)
 	authService := service.NewAuthService(userRepository, token.NewManager(cfg.JWT), redisClient, mailpkg.New(cfg.Mail))
 	authHandler := handler.NewAuthHandler(authService)
@@ -106,6 +108,8 @@ func run() error {
 	fileService := service.NewFileService(fileRepository, storageClient, cfg.Storage)
 	activityService := service.NewActivityService(activityRepository, categoryRepository, tagRepository, userRepository, fileRepository, fileService)
 	activityHandler := handler.NewActivityHandler(activityService, userService)
+	registrationService := service.NewRegistrationService(registrationRepository, ticketRepository, activityRepository, userRepository, fileRepository, verificationRepository, fileService)
+	registrationHandler := handler.NewRegistrationHandler(registrationService, userService)
 	verificationService, err := service.NewVerificationService(verificationRepository, fileRepository, cfg.Security)
 	if err != nil {
 		return fmt.Errorf("initialize verification service: %w", err)
@@ -127,6 +131,7 @@ func run() error {
 		FileHandler:         handler.NewFileHandler(fileService, userService),
 		VerificationHandler: handler.NewVerificationHandler(verificationService, userService),
 		ActivityHandler:     activityHandler,
+		RegistrationHandler: registrationHandler,
 		Authenticator:       authService,
 		AdminChecker:        authService,
 		Readiness:           readiness,

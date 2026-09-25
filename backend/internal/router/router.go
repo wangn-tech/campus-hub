@@ -17,6 +17,7 @@ type Dependencies struct {
 	FileHandler         *handler.FileHandler
 	VerificationHandler *handler.VerificationHandler
 	ActivityHandler     *handler.ActivityHandler
+	RegistrationHandler *handler.RegistrationHandler
 	Authenticator       middleware.Authenticator
 	AdminChecker        middleware.AdminChecker
 	Readiness           *health.Service
@@ -61,7 +62,7 @@ func New(dependencies Dependencies) *gin.Engine {
 		}
 		detail.GET("/activities/:id", dependencies.ActivityHandler.Detail)
 	}
-	if dependencies.Authenticator == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil || dependencies.ActivityHandler == nil {
+	if dependencies.Authenticator == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil || dependencies.ActivityHandler == nil || dependencies.RegistrationHandler == nil {
 		return r
 	}
 	protected := r.Group("/api/v1")
@@ -84,6 +85,12 @@ func New(dependencies Dependencies) *gin.Engine {
 	protected.PUT("/activities/:id", dependencies.ActivityHandler.Update)
 	protected.POST("/activities/:id/submit", dependencies.ActivityHandler.Submit)
 	protected.POST("/activities/:id/cancel", dependencies.ActivityHandler.Cancel)
+	protected.POST("/activities/:id/registrations", dependencies.RegistrationHandler.Register)
+	protected.GET("/registrations/:id", dependencies.RegistrationHandler.Detail)
+	protected.DELETE("/registrations/:id", dependencies.RegistrationHandler.Cancel)
+	protected.GET("/users/me/activities/registered", dependencies.RegistrationHandler.MyRegistrations)
+	protected.GET("/tickets", dependencies.RegistrationHandler.MyTickets)
+	protected.GET("/tickets/:id", dependencies.RegistrationHandler.Ticket)
 	if dependencies.AdminChecker != nil {
 		admin := protected.Group("")
 		admin.Use(middleware.RequireAdmin(dependencies.AdminChecker))

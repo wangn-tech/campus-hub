@@ -50,6 +50,23 @@ func (r *ActivityRepository) FindByUUID(ctx context.Context, id string) (*model.
 	return &activity, nil
 }
 
+func (r *ActivityRepository) FindByIDs(ctx context.Context, ids []uint64) ([]model.Activity, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var activities []model.Activity
+	err := r.db.WithContext(ctx).Where("id IN ? AND deleted_at IS NULL", ids).Find(&activities).Error
+	return activities, err
+}
+
+func (r *ActivityRepository) FindByID(ctx context.Context, id uint64) (*model.Activity, error) {
+	var activity model.Activity
+	if err := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id).First(&activity).Error; err != nil {
+		return nil, err
+	}
+	return &activity, nil
+}
+
 func (r *ActivityRepository) List(ctx context.Context, filter ActivityFilter) ([]model.Activity, int64, error) {
 	base := func() *gorm.DB {
 		query := r.db.WithContext(ctx).Model(&model.Activity{}).Where("activities.deleted_at IS NULL")

@@ -66,14 +66,10 @@ func (s *ActivityService) buildViews(ctx context.Context, activities []model.Act
 	activityIDs := make([]uint64, 0, len(activities))
 	categoryIDs := make([]uint64, 0, len(activities))
 	organizerIDs := make([]uint64, 0, len(activities))
-	fileIDs := make([]uint64, 0, len(activities))
 	for _, activity := range activities {
 		activityIDs = append(activityIDs, activity.ID)
 		categoryIDs = append(categoryIDs, activity.CategoryID)
 		organizerIDs = append(organizerIDs, activity.OrganizerID)
-		if activity.CoverFileID != nil {
-			fileIDs = append(fileIDs, *activity.CoverFileID)
-		}
 	}
 	tagMap, err := s.activities.TagsForActivityIDs(ctx, activityIDs)
 	if err != nil {
@@ -87,22 +83,13 @@ func (s *ActivityService) buildViews(ctx context.Context, activities []model.Act
 	if err != nil {
 		return nil, err
 	}
-	for _, organizer := range organizers {
-		if organizer.AvatarFileID != nil {
-			fileIDs = append(fileIDs, *organizer.AvatarFileID)
-		}
-	}
-	files, err := s.files.FindByIDs(ctx, uniqueUint64(fileIDs))
+	coverURLs, err := presignCoverURLs(ctx, s.files, s.attachments, activities)
 	if err != nil {
 		return nil, err
 	}
-	urls := make(map[uint64]string, len(files))
-	for i := range files {
-		url, err := s.attachments.AccessURL(ctx, &files[i])
-		if err != nil {
-			return nil, err
-		}
-		urls[files[i].ID] = url
+	avatarURLs, err := presignAvatarURLs(ctx, s.files, s.attachments, organizers)
+	if err != nil {
+		return nil, err
 	}
 	categoryByID := make(map[uint64]model.Category, len(categories))
 	for _, category := range categories {
@@ -140,7 +127,7 @@ func (s *ActivityService) buildViews(ctx context.Context, activities []model.Act
 			UpdatedAt:                timestamp.Millis(activity.UpdatedAt),
 		}
 		if activity.CoverFileID != nil {
-			view.CoverURL = urls[*activity.CoverFileID]
+			view.CoverURL = coverURLs[*activity.CoverFileID]
 		}
 		if category, ok := categoryByID[activity.CategoryID]; ok {
 			view.Category = ActivityCategory{ID: category.UUID, Name: category.Name}
@@ -148,7 +135,7 @@ func (s *ActivityService) buildViews(ctx context.Context, activities []model.Act
 		if organizer, ok := organizerByID[activity.OrganizerID]; ok {
 			view.Organizer = ActivityOrganizer{ID: organizer.UUID, Name: organizer.Nickname}
 			if organizer.AvatarFileID != nil {
-				view.Organizer.AvatarURL = urls[*organizer.AvatarFileID]
+				view.Organizer.AvatarURL = avatarURLs[organizer.ID]
 			}
 		} else {
 			view.Organizer = ActivityOrganizer{Name: activity.OrganizerName}

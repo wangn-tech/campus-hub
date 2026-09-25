@@ -140,6 +140,124 @@ paths:
       operationId: submitStudentVerification
       security: [{bearerAuth: []}]
       responses: {'200': {$ref: '#/components/responses/Success'}}
+  /api/v1/categories:
+    get:
+      operationId: listCategories
+      responses: {'200': {$ref: '#/components/responses/Success'}}
+  /api/v1/activities:
+    get:
+      operationId: listActivities
+      parameters:
+        - {name: category_id, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {type: integer}}
+        - {name: sort, in: query, schema: {type: string, enum: [start_time, created_at, hot]}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 50}}
+      responses: {'200': {$ref: '#/components/responses/Success'}}
+    post:
+      operationId: createActivity
+      security: [{bearerAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ActivityForm'}}}}
+      responses: {'200': {$ref: '#/components/responses/Success'}, '400': {$ref: '#/components/responses/Error'}}
+  /api/v1/activities/search:
+    get:
+      operationId: searchActivities
+      parameters:
+        - {name: keyword, in: query, schema: {type: string}}
+        - {name: category_id, in: query, schema: {type: string, format: uuid}}
+        - {name: tag_id, in: query, schema: {type: string, format: uuid}}
+        - {name: start_time, in: query, schema: {type: integer, format: int64}}
+        - {name: end_time, in: query, schema: {type: integer, format: int64}}
+        - {name: location, in: query, schema: {type: string}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 50}}
+      responses: {'200': {$ref: '#/components/responses/Success'}}
+  /api/v1/activities/{id}:
+    get:
+      operationId: getActivity
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '404': {$ref: '#/components/responses/Error'}}
+    put:
+      operationId: updateActivity
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ActivityForm'}}}}
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /api/v1/activities/{id}/submit:
+    post:
+      operationId: submitActivity
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '409': {$ref: '#/components/responses/Error'}}
+  /api/v1/activities/{id}/cancel:
+    post:
+      operationId: cancelActivity
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '409': {$ref: '#/components/responses/Error'}}
+  /api/v1/activities/{id}/approve:
+    post:
+      operationId: approveActivity
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}}
+  /api/v1/activities/{id}/reject:
+    post:
+      operationId: rejectActivity
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}}
+  /api/v1/activities/{id}/send-back:
+    post:
+      operationId: sendBackActivity
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}}
+  /api/v1/users/me/activities/created:
+    get:
+      operationId: listMyCreatedActivities
+      security: [{bearerAuth: []}]
+      responses: {'200': {$ref: '#/components/responses/Success'}}
+  /api/v1/users/me/activities/registered:
+    get:
+      operationId: listMyRegistrations
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [upcoming, history]}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 50}}
+      responses: {'200': {$ref: '#/components/responses/Success'}}
+  /api/v1/activities/{id}/registrations:
+    post:
+      operationId: registerForActivity
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /api/v1/registrations/{id}:
+    get:
+      operationId: getRegistration
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}}
+    delete:
+      operationId: cancelRegistration
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+  /api/v1/tickets:
+    get:
+      operationId: listMyTickets
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 50}}
+      responses: {'200': {$ref: '#/components/responses/Success'}}
+  /api/v1/tickets/{id}:
+    get:
+      operationId: getTicket
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
@@ -164,6 +282,29 @@ components:
       type: object
       required: [refresh_token]
       properties: {refresh_token: {type: string}}
+    ActivityForm:
+      type: object
+      required: [title, category_id, register_start_at, register_end_at, activity_start_at, activity_end_at, location, max_participants]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 100}
+        cover_file_id: {type: string, format: uuid}
+        description: {type: string}
+        category_id: {type: string, format: uuid}
+        contact_phone: {type: string}
+        register_start_at: {type: integer, format: int64, description: Unix milliseconds}
+        register_end_at: {type: integer, format: int64, description: Unix milliseconds}
+        activity_start_at: {type: integer, format: int64, description: Unix milliseconds}
+        activity_end_at: {type: integer, format: int64, description: Unix milliseconds}
+        location: {type: string, minLength: 1, maxLength: 200}
+        address_detail: {type: string}
+        longitude: {type: number, format: double}
+        latitude: {type: number, format: double}
+        max_participants: {type: integer, minimum: 1}
+        require_approval: {type: boolean}
+        require_student_verify: {type: boolean}
+        min_credit_score: {type: integer, minimum: 0}
+        tag_ids: {type: array, items: {type: string, format: uuid}}
+        is_draft: {type: boolean, description: Create only}
     Response:
       type: object
       required: [code, message, data]
