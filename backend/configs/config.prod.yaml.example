@@ -1,7 +1,7 @@
 app:
   name: campushub
   env: prod
-  timezone: UTC
+  timezone: Asia/Shanghai
   instance_id: replace-me
 http:
   host: 0.0.0.0
@@ -13,17 +13,37 @@ mysql:
   username: campushub
   password: ""
   database: campushub
+  charset: utf8mb4
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 30m
+  log_level: warn
 redis:
   host: redis
   port: 6379
+  database: 0
+  pool_size: 50
+  min_idle_conns: 5
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
 kafka:
   brokers:
     - kafka:9092
+  client_id: campushub-backend
+  producer_acks: all
+  producer_batch_size: 100
   consumer_group: campushub-backend
   chat_delivery_group_prefix: campushub.chat-delivery
+  enable_consumers: true
+  sasl_enabled: false
 elasticsearch:
   addresses:
     - http://elasticsearch:9200
+  alias: activities
+  index_prefix: campushub
+  enable_search: true
+  request_timeout: 10s
 storage:
   driver: minio
   endpoint: minio:9000
@@ -35,3 +55,9 @@ jwt:
   issuer: campushub
   access_secret: ""
   refresh_secret: ""
+log:
+  level: info
+  encoding: json
+  output: stdout
+observability:
+  readiness_timeout: 3s

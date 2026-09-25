@@ -4,9 +4,35 @@ info:
   version: 1.0.0
   description: Canonical HTTP API contract for the CampusHub backend foundation.
 servers:
-  - url: /api/v1
+  - url: /
 paths:
-  /auth/register:
+  /health:
+    get:
+      operationId: health
+      responses:
+        '200':
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  /ready:
+    get:
+      operationId: ready
+      responses:
+        '200':
+          description: All required dependencies are ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+        '503':
+          description: One or more dependencies are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  /api/v1/auth/register:
     post:
       operationId: register
       requestBody:
@@ -24,7 +50,7 @@ paths:
                 $ref: '#/components/schemas/Response'
         '409':
           $ref: '#/components/responses/Error'
-  /auth/login:
+  /api/v1/auth/login:
     post:
       operationId: login
       requestBody:
