@@ -87,11 +87,20 @@ func (s *FileService) Avatar(ctx context.Context, user *model.User) (*model.File
 	if err != nil {
 		return nil, "", err
 	}
-	url, err := s.storage.SignedURL(ctx, f.ObjectKey)
+	url, err := s.AccessURL(ctx, f)
 	if err != nil {
-		return nil, "", fmt.Errorf("%w: %v", ErrStorageUnavailable, err)
+		return nil, "", err
 	}
 	return f, url, nil
+}
+
+// AccessURL returns a fresh, short lived URL for an already stored file.
+func (s *FileService) AccessURL(ctx context.Context, f *model.File) (string, error) {
+	url, err := s.storage.SignedURL(ctx, f.ObjectKey)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrStorageUnavailable, err)
+	}
+	return url, nil
 }
 func (s *FileService) Delete(ctx context.Context, user *model.User, id string) error {
 	f, e := s.repo.FindByUUID(ctx, id)

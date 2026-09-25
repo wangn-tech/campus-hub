@@ -56,3 +56,23 @@ func Auth(authenticator Authenticator) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// OptionalAuth attaches the authenticated user's UUID when a valid bearer token
+// is present and continues otherwise. It lets public endpoints personalize the
+// response for their owner or an administrator without requiring a token.
+func OptionalAuth(authenticator Authenticator) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw, ok := BearerToken(c)
+		if !ok {
+			c.Next()
+			return
+		}
+		userUUID, err := authenticator.Authenticate(c.Request.Context(), raw)
+		if err != nil {
+			c.Next()
+			return
+		}
+		c.Set(UserUUIDKey, userUUID)
+		c.Next()
+	}
+}

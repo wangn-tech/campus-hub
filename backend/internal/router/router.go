@@ -16,7 +16,9 @@ type Dependencies struct {
 	UserHandler         *handler.UserHandler
 	FileHandler         *handler.FileHandler
 	VerificationHandler *handler.VerificationHandler
+	ActivityHandler     *handler.ActivityHandler
 	Authenticator       middleware.Authenticator
+	AdminChecker        middleware.AdminChecker
 	Readiness           *health.Service
 	Logger              *zap.Logger
 	AllowedOrigins      []string
@@ -48,10 +50,18 @@ func New(dependencies Dependencies) *gin.Engine {
 	auth.POST("/refresh", dependencies.AuthHandler.Refresh)
 	auth.POST("/password/reset", dependencies.AuthHandler.ResetPassword)
 	r.POST("/api/v1/email-codes", dependencies.AuthHandler.EmailCode)
-	if dependencies.UserHandler != nil {
-		r.GET("/api/v1/tags", dependencies.UserHandler.Tags)
+	if dependencies.ActivityHandler != nil {
+		r.GET("/api/v1/categories", dependencies.ActivityHandler.Categories)
+		r.GET("/api/v1/tags", dependencies.ActivityHandler.Tags)
+		r.GET("/api/v1/activities/search", dependencies.ActivityHandler.Search)
+		r.GET("/api/v1/activities", dependencies.ActivityHandler.List)
+		detail := r.Group("/api/v1")
+		if dependencies.Authenticator != nil {
+			detail.Use(middleware.OptionalAuth(dependencies.Authenticator))
+		}
+		detail.GET("/activities/:id", dependencies.ActivityHandler.Detail)
 	}
-	if dependencies.Authenticator == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil {
+	if dependencies.Authenticator == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil || dependencies.ActivityHandler == nil {
 		return r
 	}
 	protected := r.Group("/api/v1")
@@ -69,5 +79,17 @@ func New(dependencies Dependencies) *gin.Engine {
 	protected.POST("/student-verifications", dependencies.VerificationHandler.Submit)
 	protected.POST("/student-verifications/:id/confirm", dependencies.VerificationHandler.Confirm)
 	protected.POST("/student-verifications/:id/cancel", dependencies.VerificationHandler.Cancel)
+	protected.GET("/users/me/activities/created", dependencies.ActivityHandler.MyCreated)
+	protected.POST("/activities", dependencies.ActivityHandler.Create)
+	protected.PUT("/activities/:id", dependencies.ActivityHandler.Update)
+	protected.POST("/activities/:id/submit", dependencies.ActivityHandler.Submit)
+	protected.POST("/activities/:id/cancel", dependencies.ActivityHandler.Cancel)
+	if dependencies.AdminChecker != nil {
+		admin := protected.Group("")
+		admin.Use(middleware.RequireAdmin(dependencies.AdminChecker))
+		admin.POST("/activities/:id/approve", dependencies.ActivityHandler.Approve)
+		admin.POST("/activities/:id/reject", dependencies.ActivityHandler.Reject)
+		admin.POST("/activities/:id/send-back", dependencies.ActivityHandler.SendBack)
+	}
 	return r
 }

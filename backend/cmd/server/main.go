@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron/v3"
 	"github.com/wangn-tech/campus-hub/internal/config"
 	"github.com/wangn-tech/campus-hub/internal/handler"
 	"github.com/wangn-tech/campus-hub/internal/health"
@@ -95,22 +97,43 @@ func run() error {
 	userRepository := repository.NewUserRepository(db)
 	fileRepository := repository.NewFileRepository(db)
 	tagRepository := repository.NewTagRepository(db)
+	categoryRepository := repository.NewCategoryRepository(db)
+	activityRepository := repository.NewActivityRepository(db)
 	verificationRepository := repository.NewVerificationRepository(db)
 	authService := service.NewAuthService(userRepository, token.NewManager(cfg.JWT), redisClient, mailpkg.New(cfg.Mail))
 	authHandler := handler.NewAuthHandler(authService)
 	userService := service.NewUserService(userRepository, tagRepository, fileRepository)
 	fileService := service.NewFileService(fileRepository, storageClient, cfg.Storage)
+	activityService := service.NewActivityService(activityRepository, categoryRepository, tagRepository, userRepository, fileRepository, fileService)
+	activityHandler := handler.NewActivityHandler(activityService, userService)
 	verificationService, err := service.NewVerificationService(verificationRepository, fileRepository, cfg.Security)
 	if err != nil {
 		return fmt.Errorf("initialize verification service: %w", err)
 	}
+	statusSync := cron.New()
+	if _, err := statusSync.AddFunc("@every 1m", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		changed, syncErr := activityService.SyncStatuses(ctx)
+		if syncErr != nil {
+			logger.Warn("activity status sync failed", zap.Error(syncErr))
+			return
+		}
+		if changed > 0 {
+			logger.Info("activity status synced", zap.Int64("changed", changed))
+		}
+	}); err != nil {
+		return fmt.Errorf("schedule activity status sync: %w", err)
+	}
+	statusSync.Start()
+	defer statusSync.Stop()
 	readiness := health.New(cfg.Observability.ReadinessTimeout,
 		health.CheckFunc{CheckName: "mysql", Fn: func(ctx context.Context) error { return database.Check(ctx, db) }},
 		health.CheckFunc{CheckName: "redis", Fn: func(ctx context.Context) error { return redispkg.Check(ctx, redisClient) }},
 		health.CheckFunc{CheckName: "kafka", Fn: func(ctx context.Context) error { return kafkapkg.Check(ctx, kafkaClient) }},
 		health.CheckFunc{CheckName: "elasticsearch", Fn: func(ctx context.Context) error { return esClient.Check(ctx) }},
 	)
-	engine := router.New(router.Dependencies{AuthHandler: authHandler, UserHandler: handler.NewUserHandler(userService, fileService), FileHandler: handler.NewFileHandler(fileService, userService), VerificationHandler: handler.NewVerificationHandler(verificationService, userService), Authenticator: authService, Readiness: readiness, Logger: logger, AllowedOrigins: cfg.HTTP.AllowedOrigins})
+	engine := router.New(router.Dependencies{AuthHandler: authHandler, UserHandler: handler.NewUserHandler(userService, fileService), FileHandler: handler.NewFileHandler(fileService, userService), VerificationHandler: handler.NewVerificationHandler(verificationService, userService), ActivityHandler: activityHandler, Authenticator: authService, AdminChecker: authService, Readiness: readiness, Logger: logger, AllowedOrigins: cfg.HTTP.AllowedOrigins})
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.HTTP.Host, cfg.HTTP.Port),
 		Handler:      engine,

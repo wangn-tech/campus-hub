@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/wangn-tech/campus-hub/internal/handler"
 	"github.com/wangn-tech/campus-hub/internal/health"
+	"github.com/wangn-tech/campus-hub/internal/service"
 	"go.uber.org/zap"
 )
 
@@ -61,4 +63,54 @@ func newTestRouter(failures map[string]error) *gin.Engine {
 		checkers = append(checkers, health.CheckFunc{CheckName: name, Fn: func(context.Context) error { return failures[name] }})
 	}
 	return New(Dependencies{Readiness: health.New(time.Second, checkers...), Logger: zap.NewNop(), AllowedOrigins: []string{"http://localhost:5173"}})
+}
+
+type stubAuthenticator struct{}
+
+func (stubAuthenticator) Authenticate(context.Context, string) (string, error) {
+	return "user-uuid", nil
+}
+
+type stubAdminChecker struct{}
+
+func (stubAdminChecker) IsAdmin(context.Context, string) (bool, error) { return false, nil }
+
+func TestActivityRoutesAreRegistered(t *testing.T) {
+	activityService := service.NewActivityService(nil, nil, nil, nil, nil, nil)
+	userService := service.NewUserService(nil, nil, nil)
+	engine := New(Dependencies{
+		AuthHandler:         handler.NewAuthHandler(nil),
+		UserHandler:         handler.NewUserHandler(userService),
+		FileHandler:         handler.NewFileHandler(nil, userService),
+		VerificationHandler: handler.NewVerificationHandler(nil, userService),
+		ActivityHandler:     handler.NewActivityHandler(activityService, userService),
+		Authenticator:       stubAuthenticator{},
+		AdminChecker:        stubAdminChecker{},
+		Readiness:           health.New(time.Second),
+		Logger:              zap.NewNop(),
+		AllowedOrigins:      []string{"http://localhost:5173"},
+	})
+	registered := make(map[string]bool)
+	for _, route := range engine.Routes() {
+		registered[route.Method+" "+route.Path] = true
+	}
+	for _, want := range []string{
+		"GET /api/v1/categories",
+		"GET /api/v1/tags",
+		"GET /api/v1/activities",
+		"GET /api/v1/activities/search",
+		"GET /api/v1/activities/:id",
+		"POST /api/v1/activities",
+		"PUT /api/v1/activities/:id",
+		"POST /api/v1/activities/:id/submit",
+		"POST /api/v1/activities/:id/cancel",
+		"POST /api/v1/activities/:id/approve",
+		"POST /api/v1/activities/:id/reject",
+		"POST /api/v1/activities/:id/send-back",
+		"GET /api/v1/users/me/activities/created",
+	} {
+		if !registered[want] {
+			t.Fatalf("missing route %s", want)
+		}
+	}
 }

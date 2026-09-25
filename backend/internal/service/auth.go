@@ -61,6 +61,18 @@ func normalizedEmail(email string) string { return strings.ToLower(strings.TrimS
 func (s *AuthService) Current(ctx context.Context, id string) (*model.User, error) {
 	return s.users.FindByUUID(ctx, id)
 }
+
+// IsAdmin reports whether the authenticated user holds the admin role.
+func (s *AuthService) IsAdmin(ctx context.Context, userUUID string) (bool, error) {
+	u, err := s.users.FindByUUID(ctx, userUUID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return s.users.HasRole(ctx, u.ID, model.RoleAdmin)
+}
 func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*model.User, error) {
 	if err := s.validate.Struct(in); err != nil {
 		return nil, err
