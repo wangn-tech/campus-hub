@@ -312,4 +312,24 @@ kafka_payload="$("${compose[@]}" exec -T kafka /opt/kafka/bin/kafka-console-cons
 [[ -n "${kafka_payload}" ]]
 grep -q 'registration' <<<"${kafka_payload}"
 
+echo "Verifying notifications"
+unread_count=""
+for _ in $(seq 1 30); do
+  unread_body="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/notifications/unread-count" --header "Authorization: Bearer ${access_token}")"
+  unread_count="$(sed -n 's/.*"data":{"count":\([0-9]*\)}.*/\1/p' <<<"${unread_body}")"
+  [[ -n "${unread_count}" && "${unread_count}" != "0" ]] && break
+  sleep 1
+done
+[[ -n "${unread_count}" && "${unread_count}" != "0" ]]
+notifications_body="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/notifications?page=1&page_size=20" --header "Authorization: Bearer ${access_token}")"
+grep -q '"type":"registration_created"' <<<"${notifications_body}"
+notification_id="$(sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p' <<<"${notifications_body}")"
+[[ -n "${notification_id}" ]]
+mark_read_status="$(curl --silent --show-error --output "${temporary_dir}/notification-read.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/notifications/read" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "{\"ids\":[\"${notification_id}\"]}")"
+[[ "${mark_read_status}" == "200" ]]
+read_all_status="$(curl --silent --show-error --output "${temporary_dir}/notification-read-all.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/notifications/read-all" --header "Authorization: Bearer ${access_token}")"
+[[ "${read_all_status}" == "200" ]]
+unread_after="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/notifications/unread-count" --header "Authorization: Bearer ${access_token}")"
+grep -q '"count":0' <<<"${unread_after}"
+
 echo "Integration test passed"

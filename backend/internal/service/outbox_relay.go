@@ -30,6 +30,11 @@ var relayTopics = []string{
 	"campushub.system.audit.v1",
 }
 
+// RelayTopics returns the topics the relay publishes to.
+func RelayTopics() []string {
+	return append([]string(nil), relayTopics...)
+}
+
 // MessagePublisher publishes a batch of messages and reports one error per
 // message.
 type MessagePublisher interface {

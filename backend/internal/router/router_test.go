@@ -79,6 +79,7 @@ func TestActivityRoutesAreRegistered(t *testing.T) {
 	activityService := service.NewActivityService(nil, nil, nil, nil, nil, nil)
 	registrationService := service.NewRegistrationService(nil, nil, nil, nil, nil, nil, nil)
 	checkInService := service.NewCheckInService(nil, nil, nil, nil)
+	notificationService := service.NewNotificationService(nil)
 	userService := service.NewUserService(nil, nil, nil)
 	engine := New(Dependencies{
 		AuthHandler:         handler.NewAuthHandler(nil),
@@ -88,6 +89,7 @@ func TestActivityRoutesAreRegistered(t *testing.T) {
 		ActivityHandler:     handler.NewActivityHandler(activityService, userService),
 		RegistrationHandler: handler.NewRegistrationHandler(registrationService, userService),
 		CheckInHandler:      handler.NewCheckInHandler(checkInService, userService),
+		NotificationHandler: handler.NewNotificationHandler(notificationService, userService),
 		Authenticator:       stubAuthenticator{},
 		AdminChecker:        stubAdminChecker{},
 		Readiness:           health.New(time.Second),
@@ -119,6 +121,10 @@ func TestActivityRoutesAreRegistered(t *testing.T) {
 		"GET /api/v1/tickets/:id",
 		"POST /api/v1/check-ins",
 		"GET /api/v1/check-ins",
+		"GET /api/v1/notifications",
+		"GET /api/v1/notifications/unread-count",
+		"POST /api/v1/notifications/read",
+		"POST /api/v1/notifications/read-all",
 		"POST /api/v1/activities/:id/approve",
 		"POST /api/v1/activities/:id/reject",
 		"POST /api/v1/activities/:id/send-back",
