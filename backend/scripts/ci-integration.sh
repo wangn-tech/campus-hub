@@ -56,7 +56,12 @@ wait_for_status() {
 }
 
 echo "Starting Compose dependencies"
-"${compose[@]}" up --detach --wait --wait-timeout 180 mysql redis kafka elasticsearch rustfs mailpit
+# Start the whole stack without waiting so image pulls and the slow
+# Elasticsearch boot overlap with the flows below. Only MySQL, Redis, RustFS and
+# Mailpit are needed by those flows; Kafka and Elasticsearch are waited for at
+# the end, right before the /ready assertion.
+"${compose[@]}" up --detach mysql redis kafka elasticsearch rustfs mailpit
+"${compose[@]}" up --detach --wait --wait-timeout 180 mysql redis rustfs mailpit
 echo "Applying migrations"
 go run ./cmd/migrate -direction up
 echo "Building and starting backend"
@@ -65,7 +70,6 @@ CAMPUSHUB_HTTP_PORT="${integration_port}" "${temporary_dir}/campushub" >"${tempo
 server_pid=$!
 
 wait_for_status 200 /health
-wait_for_status 200 /ready
 
 echo "Verifying registration and login"
 email="integration-$(date +%s%N)@example.com"
@@ -130,6 +134,10 @@ cancel_status="$(curl --silent --show-error --output "${temporary_dir}/activity-
 [[ "${cancel_status}" == "200" ]]
 status_log_count="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM activity_status_logs WHERE activity_id = (SELECT id FROM activities WHERE uuid = '${activity_id}')" 2>/dev/null | tr -d '[:space:]')"
 [[ "${status_log_count}" -ge 3 ]]
+
+echo "Waiting for Kafka and Elasticsearch readiness"
+"${compose[@]}" up --detach --wait --wait-timeout 180 kafka elasticsearch
+wait_for_status 200 /ready
 
 echo "Verifying Redis readiness recovery"
 "${compose[@]}" stop redis
