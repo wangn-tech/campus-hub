@@ -82,3 +82,10 @@ type OutboxEvent struct {
 }
 
 func (OutboxEvent) TableName() string { return "outbox_events" }
+
+// Outbox delivery states (see the database design document section 15.1).
+const (
+	OutboxPending uint8 = 0
+	OutboxSent    uint8 = 1
+	OutboxFailed  uint8 = 2
+)

@@ -294,4 +294,22 @@ wait_for_status 200 /health
 "${compose[@]}" start redis
 "${compose[@]}" up --detach --wait --wait-timeout 60 redis
 wait_for_status 200 /ready
+
+echo "Verifying outbox relay"
+pending_events=""
+for _ in $(seq 1 25); do
+  pending_events="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM outbox_events WHERE status = 0" 2>/dev/null | tr -d '[:space:]')"
+  [[ "${pending_events}" == "0" ]] && break
+  sleep 1
+done
+[[ "${pending_events}" == "0" ]]
+sent_events="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM outbox_events WHERE sent_at IS NOT NULL" 2>/dev/null | tr -d '[:space:]')"
+[[ "${sent_events}" -ge 1 ]]
+failed_events="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM outbox_events WHERE status = 2" 2>/dev/null | tr -d '[:space:]')"
+[[ "${failed_events}" == "0" ]]
+# The events must also actually reach Kafka.
+kafka_payload="$("${compose[@]}" exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic campushub.registration.events.v1 --from-beginning --max-messages 1 --timeout-ms 20000 2>/dev/null || true)"
+[[ -n "${kafka_payload}" ]]
+grep -q 'registration' <<<"${kafka_payload}"
+
 echo "Integration test passed"

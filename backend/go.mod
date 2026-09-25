@@ -16,6 +16,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/viper v1.19.0
 	github.com/twmb/franz-go v1.20.5
+	github.com/twmb/franz-go/pkg/kmsg v1.12.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.45.0
 	gorm.io/driver/mysql v1.5.7
@@ -72,7 +73,6 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
-	github.com/twmb/franz-go/pkg/kmsg v1.12.0 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.35.0 // indirect
