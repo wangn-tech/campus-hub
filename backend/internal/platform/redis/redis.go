@@ -9,10 +9,16 @@ import (
 )
 
 func Open(cfg config.RedisConfig) (*redis.Client, error) {
-	client := redis.NewClient(&redis.Options{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Password: cfg.Password, DB: cfg.Database})
-	if err := client.Ping(context.Background()).Err(); err != nil {
-		_ = client.Close()
-		return nil, err
-	}
-	return client, nil
+	return redis.NewClient(&redis.Options{
+		Addr:         fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Password:     cfg.Password,
+		DB:           cfg.Database,
+		PoolSize:     cfg.PoolSize,
+		MinIdleConns: cfg.MinIdleConns,
+		DialTimeout:  cfg.DialTimeout,
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+	}), nil
 }
+
+func Check(ctx context.Context, client *redis.Client) error { return client.Ping(ctx).Err() }

@@ -1,7 +1,7 @@
 app:
   name: campushub
   env: test
-  timezone: UTC
+  timezone: Asia/Shanghai
   instance_id: test
 http:
   host: 127.0.0.1
@@ -12,18 +12,38 @@ mysql:
   username: campushub
   password: change-me
   database: campushub_test
+  charset: utf8mb4
+  max_open_conns: 10
+  max_idle_conns: 2
+  conn_max_lifetime: 5m
+  log_level: warn
 redis:
   host: 127.0.0.1
   port: 16379
   password: campushub_dev
+  database: 0
+  pool_size: 10
+  min_idle_conns: 1
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
 kafka:
   brokers:
     - 127.0.0.1:19092
+  client_id: campushub-test
+  producer_acks: all
+  producer_batch_size: 100
   consumer_group: campushub-test
   chat_delivery_group_prefix: campushub.chat-delivery-test
+  enable_consumers: false
+  sasl_enabled: false
 elasticsearch:
   addresses:
     - http://127.0.0.1:19200
+  alias: activities
+  index_prefix: campushub
+  enable_search: true
+  request_timeout: 10s
 storage:
   driver: local
   bucket: campushub-test
@@ -32,3 +52,9 @@ jwt:
   issuer: campushub-test
   access_secret: test-access-secret
   refresh_secret: test-refresh-secret
+log:
+  level: error
+  encoding: json
+  output: stdout
+observability:
+  readiness_timeout: 3s

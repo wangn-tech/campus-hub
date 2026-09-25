@@ -19,5 +19,8 @@ make run
 - `make lint`：执行格式化和 `go vet`。
 - `make migrate-up` / `make migrate-down`：执行或回滚一条迁移。
 - `make compose-config`：校验 Compose 文件和环境变量模板。
+- `make integration`：启动本地中间件并验证迁移、健康检查、认证和 Redis 故障恢复；会停止本次启动的 Compose 服务，但保留本地卷。
+
+`GET /health` 只表示进程存活。`GET /ready` 会并发检查 MySQL、Redis、Kafka 与 Elasticsearch：全部可用时返回 `200` 和 `ready`，任一不可用时返回 `503` 和各依赖的 `up/down` 状态。服务启动时不因依赖暂时离线退出；负载均衡应仅向 ready 实例转发业务流量。
 
 API、WebSocket 和 Kafka 的时间字段使用 Unix 毫秒整数；数据库内部使用 `DATETIME(3)`，转换统一由 `internal/platform/timestamp` 完成。真实密钥只通过环境变量注入，不提交 `.env`。

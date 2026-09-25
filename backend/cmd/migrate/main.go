@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/mysql"
@@ -14,7 +15,11 @@ import (
 func main() {
 	direction := flag.String("direction", "up", "migration direction: up or down")
 	flag.Parse()
-	cfg, err := config.Load("configs/config.dev.yaml")
+	configPath := os.Getenv("CAMPUSHUB_CONFIG_FILE")
+	if configPath == "" {
+		configPath = "configs/config.dev.yaml"
+	}
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
