@@ -105,7 +105,9 @@ func (c *Client) CreateActivityIndex(ctx context.Context, index string) error {
 // on the previous read model.
 func (c *Client) SwitchAlias(ctx context.Context, alias, index string) error {
 	body, err := json.Marshal(map[string]any{"actions": []any{
-		map[string]any{"remove": map[string]any{"index": "*", "alias": alias, "ignore_unavailable": true}},
+		// `ignore_unavailable` is not accepted by Elasticsearch's remove-alias
+		// action. `must_exist: false` keeps the first alias switch idempotent.
+		map[string]any{"remove": map[string]any{"index": "*", "alias": alias, "must_exist": false}},
 		map[string]any{"add": map[string]string{"index": index, "alias": alias}},
 	}})
 	if err != nil {
@@ -177,7 +179,9 @@ func (c *Client) addAlias(ctx context.Context, alias, index string) error {
 var activityMapping = []byte(`{"settings":{"number_of_shards":1,"number_of_replicas":0},"mappings":{"properties":{"id":{"type":"keyword"},"title":{"type":"text"},"title_keyword":{"type":"keyword"},"description":{"type":"text"},"category_id":{"type":"keyword"},"category_name":{"type":"keyword"},"tag_ids":{"type":"keyword"},"tag_names":{"type":"text"},"organizer_id":{"type":"keyword"},"organizer_name":{"type":"text"},"organizer_avatar":{"type":"keyword","index":false},"location":{"type":"text","fields":{"keyword":{"type":"keyword"}}},"address_detail":{"type":"text"},"geo_point":{"type":"geo_point"},"status":{"type":"byte"},"register_start_at":{"type":"date","format":"epoch_millis"},"register_end_at":{"type":"date","format":"epoch_millis"},"activity_start_at":{"type":"date","format":"epoch_millis"},"activity_end_at":{"type":"date","format":"epoch_millis"},"max_participants":{"type":"integer"},"approved_participant_count":{"type":"integer"},"pending_participant_count":{"type":"integer"},"view_count":{"type":"long"},"version":{"type":"long"},"deleted":{"type":"boolean"},"created_at":{"type":"date","format":"epoch_millis"},"updated_at":{"type":"date","format":"epoch_millis"}}}}`)
 
 // Index writes a document using its activity version as an external version so
-// an older Kafka record cannot overwrite a newer state.
+// an older Kafka record cannot overwrite a newer state. external_gte also
+// makes the post-alias-switch compensation scan idempotent when it replays an
+// unchanged document at the same version.
 func (c *Client) Index(ctx context.Context, alias, id string, version uint32, document any) error {
 	body, err := json.Marshal(document)
 	if err != nil {
@@ -186,7 +190,7 @@ func (c *Client) Index(ctx context.Context, alias, id string, version uint32, do
 	if version == 0 {
 		version = 1
 	}
-	path := "/" + url.PathEscape(alias) + "/_doc/" + url.PathEscape(id) + "?version_type=external&version=" + strconv.FormatUint(uint64(version), 10)
+	path := "/" + url.PathEscape(alias) + "/_doc/" + url.PathEscape(id) + "?version_type=external_gte&version=" + strconv.FormatUint(uint64(version), 10)
 	response, err := c.request(ctx, http.MethodPut, path, body)
 	if err != nil {
 		return err
