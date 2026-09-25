@@ -20,7 +20,10 @@ const (
 
 // Client wraps the franz-go client so the rest of the application does not
 // depend on the Kafka library directly.
-type Client struct{ inner *kgo.Client }
+type Client struct {
+	inner *kgo.Client
+	opts  []kgo.Opt
+}
 
 // Message is one record to publish.
 type Message struct {
@@ -49,7 +52,7 @@ func Open(cfg config.KafkaConfig) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{inner: client}, nil
+	return &Client{inner: client, opts: opts}, nil
 }
 
 func (c *Client) Check(ctx context.Context) error { return c.inner.Ping(ctx) }

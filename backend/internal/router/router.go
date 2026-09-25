@@ -19,6 +19,7 @@ type Dependencies struct {
 	ActivityHandler     *handler.ActivityHandler
 	RegistrationHandler *handler.RegistrationHandler
 	CheckInHandler      *handler.CheckInHandler
+	NotificationHandler *handler.NotificationHandler
 	Authenticator       middleware.Authenticator
 	AdminChecker        middleware.AdminChecker
 	Readiness           *health.Service
@@ -63,7 +64,7 @@ func New(dependencies Dependencies) *gin.Engine {
 		}
 		detail.GET("/activities/:id", dependencies.ActivityHandler.Detail)
 	}
-	if dependencies.Authenticator == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil || dependencies.ActivityHandler == nil || dependencies.RegistrationHandler == nil || dependencies.CheckInHandler == nil {
+	if dependencies.Authenticator == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil || dependencies.ActivityHandler == nil || dependencies.RegistrationHandler == nil || dependencies.CheckInHandler == nil || dependencies.NotificationHandler == nil {
 		return r
 	}
 	protected := r.Group("/api/v1")
@@ -97,6 +98,10 @@ func New(dependencies Dependencies) *gin.Engine {
 	protected.GET("/tickets/:id", dependencies.RegistrationHandler.Ticket)
 	protected.POST("/check-ins", dependencies.CheckInHandler.CheckIn)
 	protected.GET("/check-ins", dependencies.CheckInHandler.List)
+	protected.GET("/notifications", dependencies.NotificationHandler.List)
+	protected.GET("/notifications/unread-count", dependencies.NotificationHandler.UnreadCount)
+	protected.POST("/notifications/read", dependencies.NotificationHandler.MarkRead)
+	protected.POST("/notifications/read-all", dependencies.NotificationHandler.MarkAllRead)
 	if dependencies.AdminChecker != nil {
 		admin := protected.Group("")
 		admin.Use(middleware.RequireAdmin(dependencies.AdminChecker))
