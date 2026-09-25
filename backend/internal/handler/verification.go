@@ -19,7 +19,7 @@ func NewVerificationHandler(s *service.VerificationService, u *service.UserServi
 	return &VerificationHandler{service: s, users: u}
 }
 func (h *VerificationHandler) Current(c *gin.Context) {
-	u, e := h.users.Current(c.Request.Context(), c.MustGet(middleware.UserUUIDKey).(string))
+	u, e := h.users.Current(c.Request.Context(), middleware.UserUUID(c))
 	if e != nil {
 		userError(c, e)
 		return
@@ -41,7 +41,7 @@ func (h *VerificationHandler) Submit(c *gin.Context) {
 		bad(c)
 		return
 	}
-	u, e := h.users.Current(c.Request.Context(), c.MustGet(middleware.UserUUIDKey).(string))
+	u, e := h.users.Current(c.Request.Context(), middleware.UserUUID(c))
 	if e == nil {
 		v, err := h.service.Submit(c.Request.Context(), u, in, httpx.TraceID(c))
 		if err != nil {
@@ -54,7 +54,7 @@ func (h *VerificationHandler) Submit(c *gin.Context) {
 	verificationError(c, e)
 }
 func (h *VerificationHandler) Confirm(c *gin.Context) {
-	u, e := h.users.Current(c.Request.Context(), c.MustGet(middleware.UserUUIDKey).(string))
+	u, e := h.users.Current(c.Request.Context(), middleware.UserUUID(c))
 	if e == nil {
 		e = h.service.Confirm(c.Request.Context(), u, c.Param("id"), httpx.TraceID(c))
 	}
@@ -69,7 +69,7 @@ func (h *VerificationHandler) Cancel(c *gin.Context) {
 		Reason string `json:"reason"`
 	}
 	_ = c.ShouldBindJSON(&in)
-	u, e := h.users.Current(c.Request.Context(), c.MustGet(middleware.UserUUIDKey).(string))
+	u, e := h.users.Current(c.Request.Context(), middleware.UserUUID(c))
 	if e == nil {
 		e = h.service.Cancel(c.Request.Context(), u, c.Param("id"), in.Reason, httpx.TraceID(c))
 	}

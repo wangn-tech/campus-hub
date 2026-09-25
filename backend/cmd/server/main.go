@@ -110,7 +110,7 @@ func run() error {
 		health.CheckFunc{CheckName: "kafka", Fn: func(ctx context.Context) error { return kafkapkg.Check(ctx, kafkaClient) }},
 		health.CheckFunc{CheckName: "elasticsearch", Fn: func(ctx context.Context) error { return esClient.Check(ctx) }},
 	)
-	engine := router.New(router.Dependencies{AuthHandler: authHandler, UserHandler: handler.NewUserHandler(userService, fileService), FileHandler: handler.NewFileHandler(fileService, userService), VerificationHandler: handler.NewVerificationHandler(verificationService, userService), AuthService: authService, Readiness: readiness, Logger: logger, AllowedOrigins: cfg.HTTP.AllowedOrigins})
+	engine := router.New(router.Dependencies{AuthHandler: authHandler, UserHandler: handler.NewUserHandler(userService, fileService), FileHandler: handler.NewFileHandler(fileService, userService), VerificationHandler: handler.NewVerificationHandler(verificationService, userService), Authenticator: authService, Readiness: readiness, Logger: logger, AllowedOrigins: cfg.HTTP.AllowedOrigins})
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.HTTP.Host, cfg.HTTP.Port),
 		Handler:      engine,

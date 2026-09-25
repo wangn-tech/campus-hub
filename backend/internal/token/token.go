@@ -66,9 +66,6 @@ type Pair struct {
 	ExpiresIn    int64  `json:"expires_in"`
 }
 
-// AccessTTL is the lifetime of issued access tokens.
-func (m *Manager) AccessTTL() time.Duration { return m.accessTTL }
-
 // RefreshTTL is the lifetime of issued refresh tokens.
 func (m *Manager) RefreshTTL() time.Duration { return m.refreshTTL }
 

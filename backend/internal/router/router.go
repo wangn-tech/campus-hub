@@ -8,7 +8,6 @@ import (
 	"github.com/wangn-tech/campus-hub/internal/health"
 	"github.com/wangn-tech/campus-hub/internal/httpx"
 	"github.com/wangn-tech/campus-hub/internal/middleware"
-	"github.com/wangn-tech/campus-hub/internal/service"
 	"go.uber.org/zap"
 )
 
@@ -17,7 +16,7 @@ type Dependencies struct {
 	UserHandler         *handler.UserHandler
 	FileHandler         *handler.FileHandler
 	VerificationHandler *handler.VerificationHandler
-	AuthService         *service.AuthService
+	Authenticator       middleware.Authenticator
 	Readiness           *health.Service
 	Logger              *zap.Logger
 	AllowedOrigins      []string
@@ -52,11 +51,11 @@ func New(dependencies Dependencies) *gin.Engine {
 	if dependencies.UserHandler != nil {
 		r.GET("/api/v1/tags", dependencies.UserHandler.Tags)
 	}
-	if dependencies.AuthService == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil {
+	if dependencies.Authenticator == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil {
 		return r
 	}
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.Auth(dependencies.AuthService))
+	protected.Use(middleware.Auth(dependencies.Authenticator))
 	protected.POST("/auth/logout", dependencies.AuthHandler.Logout)
 	protected.POST("/auth/logoff", dependencies.AuthHandler.Logoff)
 	protected.PUT("/users/me/password", dependencies.AuthHandler.ChangePassword)
