@@ -25,10 +25,10 @@ CampusHub 校园活动与票据核销平台
 
 ## 性能与压测指标
 
-在单 Go 服务实例与本机 Docker 依赖（48 条活动数据、20 并发、30 秒）环境下完成核心读链路基线压测，所有请求均为 2xx、无传输错误；以下延迟单位均为毫秒（ms）：
+在单 Go 服务实例与本机 Docker 依赖（48 条活动数据、20 并发、30 秒）环境下完成核心读链路基线压测，所有请求均为 2xx、无传输错误；以下延迟单位均为毫秒（ms），QPS 为每秒成功请求数：
 
-- 活动列表：P50/P95/P99 为 24 / 31 / 35 ms（803.8 RPS）。
-- Elasticsearch 活动搜索：P50/P95/P99 为 16 / 26 / 35 ms（1,137.6 RPS）。
-- Elasticsearch 停止后的 MySQL 降级搜索：P50/P95/P99 为 11 / 16 / 20 ms（1,657.2 RPS）；验证 `X-Search-Mode` 能从 `mysql-fallback` 恢复至 `elasticsearch`。
+- 活动列表：20 并发下 QPS 803.8，P50/P95/P99 为 24 / 31 / 35 ms。
+- Elasticsearch 活动搜索：20 并发下 QPS 1,137.6，P50/P95/P99 为 16 / 26 / 35 ms。
+- Elasticsearch 停止后的 MySQL 降级搜索：20 并发下 QPS 1,657.2，P50/P95/P99 为 11 / 16 / 20 ms；验证 `X-Search-Mode` 能从 `mysql-fallback` 恢复至 `elasticsearch`。
 
 上述数据是开发机基线，不作为生产容量承诺；后续将补充报名/核销写链路、Kafka 消费延迟和双实例 WebSocket 的隔离环境压测结果。完整命令、环境与结果见 `docs/test/results/2026-09-25-local-docker.md`。
