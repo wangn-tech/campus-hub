@@ -32,8 +32,8 @@ jobs:
       - name: Cache Go modules and build cache
         # Keyed per job: the two jobs compile different build variants (the
         # race detector lives in its own cache slot), so a shared key would let
-        # whichever job finishes first evict the other's cache. The fallback
-        # restore-keys reuse any sibling or legacy cache instead of going cold.
+        # whichever job finishes first evict the other's cache. New branches
+        # fall back to the default branch cache through the restore-keys.
         uses: actions/cache@v5
         with:
           path: |
@@ -43,7 +43,6 @@ jobs:
           restore-keys: |
             go-${{ runner.os }}-${{ github.job }}-
             go-${{ runner.os }}-
-            setup-go-${{ runner.os }}-
       - name: Check Go formatting
         run: test -z "$(gofmt -l .)"
       - name: Check shell script syntax
@@ -93,7 +92,6 @@ jobs:
           restore-keys: |
             go-${{ runner.os }}-${{ github.job }}-
             go-${{ runner.os }}-
-            setup-go-${{ runner.os }}-
       - name: Configure Elasticsearch kernel requirement
         run: sudo sysctl -w vm.max_map_count=262144
       - name: Run Compose integration test
