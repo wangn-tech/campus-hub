@@ -186,6 +186,8 @@ Relay 可以：
 
 业务代码不应在同一个请求中先写 MySQL 再直接写 Kafka 并以该方式作为唯一保障，因为任一组件失败都可能造成不一致。
 
+> **例外（阶段 5）**：群聊消息不走 outbox。消息本体是 `chat_messages` 的持久化记录，`campushub.chat.events.v1` 只承载实时投递提示（消费者组 `campushub.chat-delivery.{instance_id}`），投递失败不会造成业务数据不一致，成员仍可通过 `GET /api/v1/groups/{id}/messages` 或 `GET /api/v1/messages/offline` 补齐；这样避免把聊天延迟绑在 outbox relay 的扫描周期上。活动、报名、票据、通知等业务事件仍然只走 outbox。
+
 ## 8. 消费模型
 
 ### 8.1 消费者组

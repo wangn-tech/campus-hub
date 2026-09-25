@@ -21,6 +21,8 @@ type Dependencies struct {
 	CheckInHandler      *handler.CheckInHandler
 	NotificationHandler *handler.NotificationHandler
 	ChatHandler         *handler.ChatHandler
+	WebSocketHandler    *handler.WebSocketHandler
+	WebSocketPath       string
 	Authenticator       middleware.Authenticator
 	AdminChecker        middleware.AdminChecker
 	Readiness           *health.Service
@@ -45,6 +47,13 @@ func New(dependencies Dependencies) *gin.Engine {
 		}
 		c.JSON(http.StatusServiceUnavailable, httpx.Response{Code: 100503, Message: "service not ready", Data: data, TraceID: httpx.TraceID(c)})
 	})
+	if dependencies.WebSocketHandler != nil {
+		path := dependencies.WebSocketPath
+		if path == "" {
+			path = "/ws"
+		}
+		r.GET(path, dependencies.WebSocketHandler.Handle)
+	}
 	if dependencies.AuthHandler == nil {
 		return r
 	}

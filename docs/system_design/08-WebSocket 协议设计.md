@@ -190,10 +190,12 @@ sequenceDiagram
   "data": {
     "group_id": "group-uuid",
     "msg_type": 2,
-    "image_url": "https://example.com/image.jpg"
+    "image_file_id": "file-uuid"
   }
 }
 ```
+
+> 图片消息传 `image_file_id`（由图片上传接口返回），与文件存储约定一致：只存文件 ID，展示时由服务端现签 URL，避免预签名 URL 落库或长期外泄。
 
 处理规则：
 
@@ -202,6 +204,8 @@ sequenceDiagram
 3. 返回 ACK；
 4. 通过 Kafka 的实例独立消费者组广播到其他实例；
 5. 向群内其他成员推送 `new_message`。
+
+> **实现状态（阶段 5）**：已实现 `auth`/`auth_success`/`auth_failed`、`ping`/`pong`、`send_message`/`ack`/`new_message`、`mark_read`、`error` 与连接后的房间恢复；`send_message` 用 `client_message_id` 幂等（同一 ID 重发返回原消息）。消息落库后直接写 `campushub.chat.events.v1`（不经 outbox，因为消息本体已持久化、广播只是投递提示，且聊天对延迟敏感），各实例用自己的消费者组 `campushub.chat-delivery.{instance_id}` 投递到本实例连接。`notification`、`verify_progress`、`registration_status_changed` 三个服务端事件尚未推送，留待后续阶段。
 
 ### 7.2 标记已读
 

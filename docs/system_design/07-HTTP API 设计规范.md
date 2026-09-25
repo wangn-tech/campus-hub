@@ -333,6 +333,8 @@ HTTP 状态码仍应正确返回，例如 400、401、403、404、429、500。
 | GET | `/api/v1/groups/{id}/messages` | 获取群历史消息 | 群成员 |
 | GET | `/api/v1/messages/offline` | 获取离线消息 | 是 |
 
+发送消息不走 HTTP：文本与图片消息通过 WebSocket 的 `send_message` 事件发送（图片传 `image_file_id`），断线后由 `/api/v1/messages/offline` 与 `/api/v1/groups/{id}/messages` 补齐历史。
+
 旧路径映射：
 
 - `/api/users/{user_id}/groups` → `/api/v1/users/me/groups`；

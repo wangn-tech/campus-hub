@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/wangn-tech/campus-hub/internal/config"
 	"github.com/wangn-tech/campus-hub/internal/handler"
 	"github.com/wangn-tech/campus-hub/internal/health"
+	"github.com/wangn-tech/campus-hub/internal/realtime"
 	"github.com/wangn-tech/campus-hub/internal/service"
 	"go.uber.org/zap"
 )
@@ -80,8 +82,9 @@ func TestActivityRoutesAreRegistered(t *testing.T) {
 	registrationService := service.NewRegistrationService(nil, nil, nil, nil, nil, nil, nil)
 	checkInService := service.NewCheckInService(nil, nil, nil, nil)
 	notificationService := service.NewNotificationService(nil)
-	chatService := service.NewChatService(nil, nil, nil, nil, nil)
+	chatService := service.NewChatService(nil, nil, nil, nil, nil, nil, nil)
 	userService := service.NewUserService(nil, nil, nil)
+	chatHub := realtime.NewHub(nil, zap.NewNop())
 	engine := New(Dependencies{
 		AuthHandler:         handler.NewAuthHandler(nil),
 		UserHandler:         handler.NewUserHandler(userService),
@@ -92,6 +95,8 @@ func TestActivityRoutesAreRegistered(t *testing.T) {
 		CheckInHandler:      handler.NewCheckInHandler(checkInService, userService),
 		NotificationHandler: handler.NewNotificationHandler(notificationService, userService),
 		ChatHandler:         handler.NewChatHandler(chatService, userService),
+		WebSocketHandler:    handler.NewWebSocketHandler(chatService, userService, chatHub, stubAuthenticator{}, config.WebSocketConfig{Path: "/ws", HeartbeatInterval: time.Minute}, zap.NewNop()),
+		WebSocketPath:       "/ws",
 		Authenticator:       stubAuthenticator{},
 		AdminChecker:        stubAdminChecker{},
 		Readiness:           health.New(time.Second),
@@ -103,6 +108,7 @@ func TestActivityRoutesAreRegistered(t *testing.T) {
 		registered[route.Method+" "+route.Path] = true
 	}
 	for _, want := range []string{
+		"GET /ws",
 		"GET /api/v1/categories",
 		"GET /api/v1/tags",
 		"GET /api/v1/activities",

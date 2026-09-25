@@ -18,6 +18,7 @@ type Config struct {
 	Elasticsearch ElasticsearchConfig `mapstructure:"elasticsearch"`
 	Storage       StorageConfig       `mapstructure:"storage"`
 	Activity      ActivityConfig      `mapstructure:"activity"`
+	WebSocket     WebSocketConfig     `mapstructure:"websocket"`
 	Mail          MailConfig          `mapstructure:"mail"`
 	Security      SecurityConfig      `mapstructure:"security"`
 	JWT           JWTConfig           `mapstructure:"jwt"`
@@ -83,6 +84,19 @@ type ActivityConfig struct {
 	// SchedulerInterval drives the periodic activity maintenance tasks:
 	// activity status transitions, pending registration expiry.
 	SchedulerInterval time.Duration `mapstructure:"scheduler_interval"`
+}
+
+// WebSocketConfig tunes the realtime chat endpoint described in the WebSocket
+// protocol design document section 3 and section 6.
+type WebSocketConfig struct {
+	Path              string        `mapstructure:"path"`
+	ReadBufferSize    int           `mapstructure:"read_buffer_size"`
+	WriteBufferSize   int           `mapstructure:"write_buffer_size"`
+	HandshakeTimeout  time.Duration `mapstructure:"handshake_timeout"`
+	AuthTimeout       time.Duration `mapstructure:"auth_timeout"`
+	HeartbeatInterval time.Duration `mapstructure:"heartbeat_interval"`
+	MaxMessageSize    int64         `mapstructure:"max_message_size"`
+	AllowedOrigins    []string      `mapstructure:"allowed_origins"`
 }
 
 type MailConfig struct {
@@ -196,6 +210,14 @@ func Load(path string) (Config, error) {
 	v.SetDefault("storage.presign_ttl", "15m")
 	v.SetDefault("storage.max_image_size", 5242880)
 	v.SetDefault("activity.scheduler_interval", "1m")
+	v.SetDefault("websocket.path", "/ws")
+	v.SetDefault("websocket.read_buffer_size", 4096)
+	v.SetDefault("websocket.write_buffer_size", 4096)
+	v.SetDefault("websocket.handshake_timeout", "10s")
+	v.SetDefault("websocket.auth_timeout", "10s")
+	v.SetDefault("websocket.heartbeat_interval", "45s")
+	v.SetDefault("websocket.max_message_size", 4096)
+	v.SetDefault("websocket.allowed_origins", []string{"http://localhost:5173"})
 	v.SetDefault("mail.host", "127.0.0.1")
 	v.SetDefault("mail.port", 1025)
 	v.SetDefault("mail.from", "noreply@campushub.local")
@@ -275,6 +297,13 @@ func (c Config) Validate() error {
 	}
 	if c.Activity.SchedulerInterval <= 0 {
 		return fmt.Errorf("activity.scheduler_interval must be positive")
+	}
+	if !strings.HasPrefix(c.WebSocket.Path, "/") {
+		return fmt.Errorf("websocket.path must start with /")
+	}
+	if c.WebSocket.ReadBufferSize < 1 || c.WebSocket.WriteBufferSize < 1 || c.WebSocket.MaxMessageSize < 1 ||
+		c.WebSocket.HandshakeTimeout <= 0 || c.WebSocket.AuthTimeout <= 0 || c.WebSocket.HeartbeatInterval <= 0 {
+		return fmt.Errorf("websocket buffer sizes, timeouts, and max_message_size must be positive")
 	}
 	if c.Mail.Host == "" || c.Mail.Port < 1 || c.Mail.Port > 65535 || c.Mail.From == "" || (c.Mail.TLSMode != "none" && c.Mail.TLSMode != "starttls") {
 		return fmt.Errorf("mail configuration is invalid")

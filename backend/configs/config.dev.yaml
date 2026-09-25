@@ -82,3 +82,13 @@ observability:
   readiness_timeout: 3s
 activity:
   scheduler_interval: 1m
+websocket:
+  path: /ws
+  read_buffer_size: 4096
+  write_buffer_size: 4096
+  handshake_timeout: 10s
+  auth_timeout: 10s
+  heartbeat_interval: 45s
+  max_message_size: 4096
+  allowed_origins:
+    - http://localhost:5173

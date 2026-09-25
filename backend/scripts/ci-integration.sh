@@ -386,4 +386,40 @@ fi
 members_after="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/groups/${chat_group}/members" --header "Authorization: Bearer ${access_token}")"
 [[ "$(grep -o '"role":' <<<"${members_after}" | wc -l | tr -d '[:space:]')" == "1" ]]
 
+echo "Verifying websocket chat"
+# Build a group with two members, then let the WebSocket probe send and receive
+# through Kafka and the per instance delivery consumer.
+ws_activity="$(create_published_activity true "integration websocket activity")"
+ws_group="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT g.uuid FROM chat_groups g JOIN activities a ON a.id = g.activity_id WHERE a.uuid = '${ws_activity}'" 2>/dev/null | tr -d '[:space:]')"
+[[ -n "${ws_group}" ]]
+ws_register_status="$(curl --silent --show-error --output "${temporary_dir}/ws-registration.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${ws_activity}/registrations" --header "Authorization: Bearer ${other_token}")"
+[[ "${ws_register_status}" == "200" ]]
+ws_registration="$(sed -n 's/.*"data":{"id":"\([^"]*\)".*/\1/p' "${temporary_dir}/ws-registration.json")"
+[[ -n "${ws_registration}" ]]
+ws_approve_status="$(curl --silent --show-error --output "${temporary_dir}/ws-approved.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/registrations/${ws_registration}/approve" --header "Authorization: Bearer ${access_token}")"
+[[ "${ws_approve_status}" == "200" ]]
+ws_members=""
+for _ in $(seq 1 30); do
+  ws_members="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM chat_group_members WHERE group_id = (SELECT id FROM chat_groups WHERE uuid = '${ws_group}') AND status = 1" 2>/dev/null | tr -d '[:space:]')"
+  [[ "${ws_members}" == "2" ]] && break
+  sleep 1
+done
+[[ "${ws_members}" == "2" ]]
+ws_client_id="ci-ws-${run_id}"
+probe_output="$(go run ./scripts/wsprobe --url "ws://127.0.0.1:${integration_port}/ws" --token "${primary_token}" --peer-token "${other_token}" --outsider-token "${outsider_token}" --group "${ws_group}" --text "ci websocket ${run_id}" --client-id "${ws_client_id}")"
+grep -q '^ok message_id=' <<<"${probe_output}"
+ws_message_id="$(sed -n 's/^ok message_id=\(.*\)$/\1/p' <<<"${probe_output}")"
+[[ -n "${ws_message_id}" ]]
+# The resent frame must not have created a second message.
+ws_message_count="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM chat_messages WHERE client_message_id = '${ws_client_id}'" 2>/dev/null | tr -d '[:space:]')"
+[[ "${ws_message_count}" == "1" ]]
+# The receiver's read pointer is updated by mark_read.
+ws_read_pointer=""
+for _ in $(seq 1 20); do
+  ws_read_pointer="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM chat_group_members m JOIN chat_groups g ON g.id = m.group_id JOIN activities a ON a.id = g.activity_id WHERE g.uuid = '${ws_group}' AND m.user_id = a.organizer_id AND m.last_read_message_id IS NOT NULL" 2>/dev/null | tr -d '[:space:]')"
+  [[ "${ws_read_pointer}" == "1" ]] && break
+  sleep 1
+done
+[[ "${ws_read_pointer}" == "1" ]]
+
 echo "Integration test passed"

@@ -22,6 +22,7 @@ import (
 	mailpkg "github.com/wangn-tech/campus-hub/internal/platform/mail"
 	redispkg "github.com/wangn-tech/campus-hub/internal/platform/redis"
 	storagepkg "github.com/wangn-tech/campus-hub/internal/platform/storage"
+	"github.com/wangn-tech/campus-hub/internal/realtime"
 	"github.com/wangn-tech/campus-hub/internal/repository"
 	"github.com/wangn-tech/campus-hub/internal/router"
 	"github.com/wangn-tech/campus-hub/internal/service"
@@ -120,10 +121,12 @@ func run() error {
 	notificationService := service.NewNotificationService(notificationRepository)
 	notificationHandler := handler.NewNotificationHandler(notificationService, userService)
 	notificationConsumer := service.NewNotificationConsumer(notificationRepository, activityRepository, userRepository, logger)
-	chatService := service.NewChatService(chatRepository, activityRepository, userRepository, fileRepository, fileService)
+	chatHub := realtime.NewHub(realtime.NewRedisPresence(redisClient), logger)
+	chatService := service.NewChatService(chatRepository, activityRepository, userRepository, fileRepository, fileService, kafkaClient, logger)
 	chatHandler := handler.NewChatHandler(chatService, userService)
 	chatMembershipConsumer := service.NewChatMembershipConsumer(chatRepository, activityRepository, userRepository, logger)
-	topics := append(service.RelayTopics(), service.NotificationTopics...)
+	chatDeliveryConsumer := service.NewChatDeliveryConsumer(chatHub, logger)
+	topics := append(append(service.RelayTopics(), service.NotificationTopics...), service.ChatTopics()...)
 	ensureCtx, cancelEnsure := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := kafkaClient.EnsureTopics(ensureCtx, topics...); err != nil {
 		logger.Warn("ensure kafka topics", zap.Error(err))
@@ -133,6 +136,7 @@ func run() error {
 	defer stopConsumer()
 	go runConsumer(consumerCtx, "notification", notificationConsumer.HandleEvent, service.NotificationConsumerGroup, service.NotificationTopics, kafkaClient, logger)
 	go runConsumer(consumerCtx, "chat membership", chatMembershipConsumer.HandleEvent, service.ChatMembershipConsumerGroup, service.ChatMembershipTopics, kafkaClient, logger)
+	go runConsumer(consumerCtx, "chat delivery", chatDeliveryConsumer.HandleEvent, service.ChatDeliveryGroup(cfg.Kafka.ChatDeliveryGroupPrefix, cfg.App.InstanceID), service.ChatTopics(), kafkaClient, logger)
 	verificationService, err := service.NewVerificationService(verificationRepository, fileRepository, cfg.Security)
 	if err != nil {
 		return fmt.Errorf("initialize verification service: %w", err)
@@ -158,6 +162,8 @@ func run() error {
 		CheckInHandler:      checkInHandler,
 		NotificationHandler: notificationHandler,
 		ChatHandler:         chatHandler,
+		WebSocketHandler:    handler.NewWebSocketHandler(chatService, userService, chatHub, authService, cfg.WebSocket, logger),
+		WebSocketPath:       cfg.WebSocket.Path,
 		Authenticator:       authService,
 		AdminChecker:        authService,
 		Readiness:           readiness,
@@ -179,6 +185,7 @@ func run() error {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	defer chatHub.Shutdown()
 	select {
 	case signalValue := <-stop:
 		logger.Info("shutdown signal received", zap.String("signal", signalValue.String()))
