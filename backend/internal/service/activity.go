@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/wangn-tech/campus-hub/internal/model"
+	espkg "github.com/wangn-tech/campus-hub/internal/platform/elasticsearch"
 	"github.com/wangn-tech/campus-hub/internal/platform/timestamp"
 	"github.com/wangn-tech/campus-hub/internal/repository"
 	"gorm.io/gorm"
@@ -48,10 +51,12 @@ type ActivityService struct {
 	users       *repository.UserRepository
 	files       *repository.FileRepository
 	attachments *FileService
+	search      *espkg.Client
+	searchAlias string
 }
 
-func NewActivityService(activities *repository.ActivityRepository, categories *repository.CategoryRepository, tags *repository.TagRepository, users *repository.UserRepository, files *repository.FileRepository, attachments *FileService) *ActivityService {
-	return &ActivityService{activities: activities, categories: categories, tags: tags, users: users, files: files, attachments: attachments}
+func NewActivityService(activities *repository.ActivityRepository, categories *repository.CategoryRepository, tags *repository.TagRepository, users *repository.UserRepository, files *repository.FileRepository, attachments *FileService, search *espkg.Client, searchAlias string) *ActivityService {
+	return &ActivityService{activities: activities, categories: categories, tags: tags, users: users, files: files, attachments: attachments, search: search, searchAlias: searchAlias}
 }
 
 // ActivityForm is the shared create/update payload. Times are Unix
@@ -97,9 +102,23 @@ type ActivitySearchQuery struct {
 	StartTime  *int64
 	EndTime    *int64
 	Location   string
+	Status     *int
+	Longitude  *float64
+	Latitude   *float64
+	Distance   string
+	Sort       string
 	Page       int
 	PageSize   int
 }
+
+type SearchMode string
+
+const (
+	SearchModeElasticsearch SearchMode = "elasticsearch"
+	SearchModeMySQLFallback SearchMode = "mysql-fallback"
+)
+
+var searchDistancePattern = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?(?:m|km)$`)
 
 func (s *ActivityService) Categories(ctx context.Context) ([]model.Category, error) {
 	return s.categories.ListActive(ctx)
@@ -143,7 +162,11 @@ func (s *ActivityService) Create(ctx context.Context, user *model.User, in Activ
 	if cover != nil {
 		activity.CoverFileID = &cover.ID
 	}
-	if err := s.activities.Create(ctx, activity, tagIDList(tags)); err != nil {
+	created, err := s.activityEvent("activity.created", activity, 1, trace)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.activities.Create(ctx, activity, tagIDList(tags), []*model.OutboxEvent{created}); err != nil {
 		return nil, err
 	}
 	if cover != nil {
@@ -213,7 +236,11 @@ func (s *ActivityService) Update(ctx context.Context, user *model.User, id strin
 			CreatedAt:    time.Now().UTC(),
 		}
 	}
-	if err := s.activities.Update(ctx, activity, values, tagIDList(tags), log); err != nil {
+	updated, err := s.activityEvent("activity.updated", activity, activity.Version+1, "")
+	if err != nil {
+		return nil, err
+	}
+	if err := s.activities.Update(ctx, activity, values, tagIDList(tags), log, []*model.OutboxEvent{updated}); err != nil {
 		if errors.Is(err, repository.ErrConcurrentUpdate) {
 			return nil, ErrActivityConflict
 		}
@@ -319,26 +346,61 @@ func (s *ActivityService) List(ctx context.Context, query ActivityListQuery) ([]
 	return s.listViews(ctx, filter)
 }
 
-func (s *ActivityService) Search(ctx context.Context, query ActivitySearchQuery) ([]ActivityView, int64, error) {
+func (s *ActivityService) Search(ctx context.Context, query ActivitySearchQuery) ([]ActivityView, int64, SearchMode, error) {
+	if err := validateActivitySearch(query); err != nil {
+		return nil, 0, "", err
+	}
+	statuses := publicActivityStatuses
+	if query.Status != nil {
+		statuses = []int{*query.Status}
+	}
+	if s.search != nil && s.searchAlias != "" {
+		page, pageSize := NormalizePage(query.Page, query.PageSize)
+		result, err := s.search.Search(ctx, s.searchAlias, espkg.SearchQuery{Keyword: strings.TrimSpace(query.Keyword), CategoryID: strings.TrimSpace(query.CategoryID), TagID: strings.TrimSpace(query.TagID), Location: strings.TrimSpace(query.Location), Status: query.Status, Longitude: query.Longitude, Latitude: query.Latitude, Distance: query.Distance, Sort: query.Sort, StartTime: query.StartTime, EndTime: query.EndTime, Page: page, PageSize: pageSize})
+		if err == nil && result.Total > 0 {
+			activities, err := s.activities.FindByUUIDs(ctx, result.IDs)
+			if err != nil {
+				return nil, 0, "", err
+			}
+			byID := make(map[string]model.Activity, len(activities))
+			for _, activity := range activities {
+				byID[activity.UUID] = activity
+			}
+			ordered := make([]model.Activity, 0, len(result.IDs))
+			for _, id := range result.IDs {
+				if activity, ok := byID[id]; ok {
+					ordered = append(ordered, activity)
+				}
+			}
+			if len(ordered) == len(result.IDs) {
+				views, err := s.buildViews(ctx, ordered)
+				if err != nil {
+					return nil, 0, "", err
+				}
+				return views, result.Total, SearchModeElasticsearch, nil
+			}
+		}
+	}
 	page, pageSize := NormalizePage(query.Page, query.PageSize)
 	filter := repository.ActivityFilter{
-		Statuses: publicActivityStatuses,
+		Statuses: statuses,
 		Keyword:  strings.TrimSpace(query.Keyword),
 		Location: strings.TrimSpace(query.Location),
+		Sort:     query.Sort,
 		Page:     page,
 		PageSize: pageSize,
 	}
 	if strings.TrimSpace(query.CategoryID) != "" {
 		category, err := s.categories.FindByUUID(ctx, strings.TrimSpace(query.CategoryID))
 		if err != nil {
-			return []ActivityView{}, 0, nil
+			return []ActivityView{}, 0, SearchModeMySQLFallback, nil
 		}
 		filter.CategoryID = &category.ID
 	}
 	if strings.TrimSpace(query.TagID) != "" {
 		tags, err := s.tags.FindByUUIDsForScope(ctx, []string{strings.TrimSpace(query.TagID)}, "activity")
 		if err != nil || len(tags) == 0 {
-			return []ActivityView{}, 0, nil
+			return []ActivityView{}, 0, SearchModeMySQLFallback, nil
 		}
 		filter.TagID = &tags[0].ID
 	}
@@ -350,7 +412,33 @@ func (s *ActivityService) Search(ctx context.Context, query ActivitySearchQuery)
 		at := timestamp.FromMillis(*query.EndTime)
 		filter.StartTo = &at
 	}
-	return s.listViews(ctx, filter)
+	items, total, err := s.listViews(ctx, filter)
+	return items, total, SearchModeMySQLFallback, err
+}
+
+func validateActivitySearch(query ActivitySearchQuery) error {
+	if query.Status != nil && (*query.Status < int(model.ActivityPublished) || *query.Status > int(model.ActivityFinished)) {
+		return ErrActivityInvalid
+	}
+	if query.Sort != "" && query.Sort != "start_time" && query.Sort != "created_at" && query.Sort != "hot" && query.Sort != "distance" {
+		return ErrActivityInvalid
+	}
+	if (query.Longitude == nil) != (query.Latitude == nil) {
+		return ErrActivityInvalid
+	}
+	if query.Longitude != nil && (math.IsNaN(*query.Longitude) || math.IsNaN(*query.Latitude) || math.IsInf(*query.Longitude, 0) || math.IsInf(*query.Latitude, 0) || math.Abs(*query.Longitude) > 180 || math.Abs(*query.Latitude) > 90) {
+		return ErrActivityInvalid
+	}
+	if query.Distance != "" && (!searchDistancePattern.MatchString(query.Distance) || query.Longitude == nil) {
+		return ErrActivityInvalid
+	}
+	if query.Sort == "distance" && query.Longitude == nil {
+		return ErrActivityInvalid
+	}
+	if query.StartTime != nil && query.EndTime != nil && *query.StartTime > *query.EndTime {
+		return ErrActivityInvalid
+	}
+	return nil
 }
 
 func (s *ActivityService) MyCreated(ctx context.Context, user *model.User, page, pageSize int) ([]ActivityView, int64, error) {
@@ -366,7 +454,10 @@ func (s *ActivityService) MyCreated(ctx context.Context, user *model.User, page,
 
 // SyncStatuses applies the time based published -> ongoing -> finished flow.
 func (s *ActivityService) SyncStatuses(ctx context.Context) (int64, error) {
-	return s.activities.SyncStatuses(ctx, time.Now().UTC())
+	return s.activities.SyncStatuses(ctx, time.Now().UTC(), func(activity model.Activity, to uint8) (*model.OutboxEvent, error) {
+		activity.Status = to
+		return s.activityEvent("activity.status_changed", &activity, activity.Version+1, "")
+	})
 }
 
 func (s *ActivityService) listViews(ctx context.Context, filter repository.ActivityFilter) ([]ActivityView, int64, error) {
@@ -427,6 +518,19 @@ func (s *ActivityService) transition(ctx context.Context, activity *model.Activi
 		Values:     values,
 		Log:        log,
 	}
+	eventType := "activity.status_changed"
+	if model.ActivityStatus(to) == model.ActivityPublished {
+		eventType = "activity.published"
+	} else if model.ActivityStatus(to) == model.ActivityCancelled {
+		eventType = "activity.cancelled"
+	}
+	eventActivity := *activity
+	eventActivity.Status = to
+	event, err := s.activityEvent(eventType, &eventActivity, activity.Version+1, trace)
+	if err != nil {
+		return err
+	}
+	input.Events = []*model.OutboxEvent{event}
 	switch model.ActivityStatus(to) {
 	case model.ActivityPublished:
 		// Publishing creates the activity group with the organizer inside it.
@@ -458,6 +562,14 @@ func (s *ActivityService) transition(ctx context.Context, activity *model.Activi
 	}
 	activity.Status = to
 	return nil
+}
+
+func (s *ActivityService) activityEvent(eventType string, activity *model.Activity, version uint32, trace string) (*model.OutboxEvent, error) {
+	return newOutboxEvent(eventType, "activity", activity.UUID, trace, map[string]any{
+		"activity_id": activity.UUID,
+		"status":      activity.Status,
+		"version":     version,
+	})
 }
 
 func (s *ActivityService) canViewPrivate(ctx context.Context, activity *model.Activity, viewerUUID string) (bool, error) {

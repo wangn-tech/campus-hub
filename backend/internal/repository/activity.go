@@ -33,12 +33,15 @@ type ActivityFilter struct {
 	PageSize    int
 }
 
-func (r *ActivityRepository) Create(ctx context.Context, activity *model.Activity, tagIDs []uint64) error {
+func (r *ActivityRepository) Create(ctx context.Context, activity *model.Activity, tagIDs []uint64, events []*model.OutboxEvent) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(activity).Error; err != nil {
 			return err
 		}
-		return replaceActivityTags(tx, activity.ID, tagIDs)
+		if err := replaceActivityTags(tx, activity.ID, tagIDs); err != nil {
+			return err
+		}
+		return enqueueOutboxEvents(tx, events)
 	})
 }
 
@@ -48,6 +51,22 @@ func (r *ActivityRepository) FindByUUID(ctx context.Context, id string) (*model.
 		return nil, err
 	}
 	return &activity, nil
+}
+
+func (r *ActivityRepository) FindByUUIDs(ctx context.Context, ids []string) ([]model.Activity, error) {
+	if len(ids) == 0 {
+		return []model.Activity{}, nil
+	}
+	var activities []model.Activity
+	err := r.db.WithContext(ctx).Where("uuid IN ? AND deleted_at IS NULL", ids).Find(&activities).Error
+	return activities, err
+}
+
+// ListForSearchRebuild scans every non-deleted source record in a stable order.
+func (r *ActivityRepository) ListForSearchRebuild(ctx context.Context, afterID uint64, limit int) ([]model.Activity, error) {
+	var activities []model.Activity
+	err := r.db.WithContext(ctx).Where("deleted_at IS NULL AND id > ?", afterID).Order("id").Limit(limit).Find(&activities).Error
+	return activities, err
 }
 
 func (r *ActivityRepository) FindByIDs(ctx context.Context, ids []uint64) ([]model.Activity, error) {
@@ -115,7 +134,7 @@ func (r *ActivityRepository) List(ctx context.Context, filter ActivityFilter) ([
 
 // Update writes the given values guarded by the activity version. When log is
 // not nil the status log is written in the same transaction.
-func (r *ActivityRepository) Update(ctx context.Context, activity *model.Activity, values map[string]any, tagIDs []uint64, log *model.ActivityStatusLog) error {
+func (r *ActivityRepository) Update(ctx context.Context, activity *model.Activity, values map[string]any, tagIDs []uint64, log *model.ActivityStatusLog, events []*model.OutboxEvent) error {
 	values["version"] = activity.Version + 1
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&model.Activity{}).
@@ -131,9 +150,11 @@ func (r *ActivityRepository) Update(ctx context.Context, activity *model.Activit
 			return err
 		}
 		if log != nil {
-			return tx.Create(log).Error
+			if err := tx.Create(log).Error; err != nil {
+				return err
+			}
 		}
-		return nil
+		return enqueueOutboxEvents(tx, events)
 	})
 }
 
@@ -150,6 +171,7 @@ type ActivityTransitionInput struct {
 	GroupOwner *model.ChatGroupMember
 	// Cancelling an activity dissolves its chat group.
 	DissolveGroup bool
+	Events        []*model.OutboxEvent
 }
 
 // Transition applies a guarded status change and records the status log in the
@@ -179,9 +201,11 @@ func (r *ActivityRepository) Transition(ctx context.Context, in ActivityTransiti
 			}
 		}
 		if in.Log != nil {
-			return tx.Create(in.Log).Error
+			if err := tx.Create(in.Log).Error; err != nil {
+				return err
+			}
 		}
-		return nil
+		return enqueueOutboxEvents(tx, in.Events)
 	})
 }
 
@@ -197,11 +221,11 @@ func (r *ActivityRepository) IncrementViewCount(ctx context.Context, id uint64) 
 
 // SyncStatuses moves published/ongoing activities to their time based status
 // and returns how many rows changed.
-func (r *ActivityRepository) SyncStatuses(ctx context.Context, now time.Time) (int64, error) {
+func (r *ActivityRepository) SyncStatuses(ctx context.Context, now time.Time, buildEvent func(model.Activity, uint8) (*model.OutboxEvent, error)) (int64, error) {
 	var changed int64
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var candidates []model.Activity
-		err := tx.Select("id", "status", "activity_start_at", "activity_end_at").
+		err := tx.Select("id", "uuid", "status", "version", "activity_start_at", "activity_end_at").
 			Where("deleted_at IS NULL AND status IN ?", []int{int(model.ActivityPublished), int(model.ActivityOngoing)}).
 			Where("activity_start_at <= ? OR activity_end_at <= ?", now, now).
 			Find(&candidates).Error
@@ -215,7 +239,7 @@ func (r *ActivityRepository) SyncStatuses(ctx context.Context, now time.Time) (i
 			}
 			result := tx.Model(&model.Activity{}).
 				Where("id = ? AND status = ?", activity.ID, activity.Status).
-				Update("status", uint8(to))
+				Updates(map[string]any{"status": uint8(to), "version": gorm.Expr("version + 1")})
 			if result.Error != nil {
 				return result.Error
 			}
@@ -233,6 +257,15 @@ func (r *ActivityRepository) SyncStatuses(ctx context.Context, now time.Time) (i
 			}
 			if err := tx.Create(log).Error; err != nil {
 				return err
+			}
+			if buildEvent != nil {
+				event, err := buildEvent(activity, uint8(to))
+				if err != nil {
+					return err
+				}
+				if err := enqueueOutboxEvents(tx, []*model.OutboxEvent{event}); err != nil {
+					return err
+				}
 			}
 			changed++
 		}

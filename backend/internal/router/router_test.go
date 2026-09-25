@@ -78,7 +78,7 @@ type stubAdminChecker struct{}
 func (stubAdminChecker) IsAdmin(context.Context, string) (bool, error) { return false, nil }
 
 func TestActivityRoutesAreRegistered(t *testing.T) {
-	activityService := service.NewActivityService(nil, nil, nil, nil, nil, nil)
+	activityService := service.NewActivityService(nil, nil, nil, nil, nil, nil, nil, "")
 	registrationService := service.NewRegistrationService(nil, nil, nil, nil, nil, nil, nil)
 	checkInService := service.NewCheckInService(nil, nil, nil, nil)
 	notificationService := service.NewNotificationService(nil)

@@ -111,7 +111,11 @@ func run() error {
 	authHandler := handler.NewAuthHandler(authService)
 	userService := service.NewUserService(userRepository, tagRepository, fileRepository)
 	fileService := service.NewFileService(fileRepository, storageClient, cfg.Storage)
-	activityService := service.NewActivityService(activityRepository, categoryRepository, tagRepository, userRepository, fileRepository, fileService)
+	var activitySearchClient *espkg.Client
+	if cfg.Elasticsearch.EnableSearch {
+		activitySearchClient = esClient
+	}
+	activityService := service.NewActivityService(activityRepository, categoryRepository, tagRepository, userRepository, fileRepository, fileService, activitySearchClient, cfg.Elasticsearch.Alias)
 	activityHandler := handler.NewActivityHandler(activityService, userService)
 	registrationService := service.NewRegistrationService(registrationRepository, ticketRepository, activityRepository, userRepository, fileRepository, verificationRepository, fileService)
 	registrationHandler := handler.NewRegistrationHandler(registrationService, userService)
@@ -120,17 +124,23 @@ func run() error {
 	outboxRelay := service.NewOutboxRelay(outboxRepository, kafkaClient)
 	notificationService := service.NewNotificationService(notificationRepository)
 	notificationHandler := handler.NewNotificationHandler(notificationService, userService)
-	notificationConsumer := service.NewNotificationConsumer(notificationRepository, activityRepository, userRepository, logger)
 	chatHub := realtime.NewHub(realtime.NewRedisPresence(redisClient), logger)
+	notificationConsumer := service.NewNotificationConsumer(notificationRepository, activityRepository, userRepository, logger)
 	chatService := service.NewChatService(chatRepository, activityRepository, userRepository, fileRepository, fileService, kafkaClient, logger)
 	chatHandler := handler.NewChatHandler(chatService, userService)
 	chatMembershipConsumer := service.NewChatMembershipConsumer(chatRepository, activityRepository, userRepository, logger)
 	chatDeliveryConsumer := service.NewChatDeliveryConsumer(chatHub, logger)
 	realtimeDeliveryConsumer := service.NewRealtimeDeliveryConsumer(chatHub, registrationRepository, ticketRepository, chatRepository, logger)
+	searchIndexer := service.NewActivitySearchIndexer(activityRepository, categoryRepository, userRepository, esClient, cfg.Elasticsearch.Alias, logger)
 	topics := append(append(append(service.RelayTopics(), service.NotificationTopics...), service.ChatTopics()...), service.RealtimeTopics()...)
 	ensureCtx, cancelEnsure := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := kafkaClient.EnsureTopics(ensureCtx, topics...); err != nil {
 		logger.Warn("ensure kafka topics", zap.Error(err))
+	}
+	if cfg.Elasticsearch.EnableSearch {
+		if err := esClient.EnsureActivityIndex(ensureCtx, service.ActivityPhysicalIndex(cfg.Elasticsearch.IndexPrefix), cfg.Elasticsearch.Alias); err != nil {
+			logger.Warn("ensure activity search index", zap.Error(err))
+		}
 	}
 	cancelEnsure()
 	consumerCtx, stopConsumer := context.WithCancel(context.Background())
@@ -139,6 +149,9 @@ func run() error {
 	go runConsumer(consumerCtx, "chat membership", chatMembershipConsumer.HandleEvent, service.ChatMembershipConsumerGroup, service.ChatMembershipTopics, kafkaClient, logger)
 	go runConsumer(consumerCtx, "chat delivery", chatDeliveryConsumer.HandleEvent, service.ChatDeliveryGroup(cfg.Kafka.ChatDeliveryGroupPrefix, cfg.App.InstanceID), service.ChatTopics(), kafkaClient, logger)
 	go runConsumer(consumerCtx, "realtime delivery", realtimeDeliveryConsumer.HandleEvent, service.RealtimeDeliveryGroup(cfg.Kafka.RealtimeDeliveryGroupPrefix, cfg.App.InstanceID), service.RealtimeTopics(), kafkaClient, logger)
+	if cfg.Elasticsearch.EnableSearch {
+		go runConsumer(consumerCtx, "activity search indexer", searchIndexer.HandleEvent, service.SearchIndexerConsumerGroup, []string{"campushub.activity.events.v1"}, kafkaClient, logger)
+	}
 	verificationService, err := service.NewVerificationService(verificationRepository, fileRepository, cfg.Security)
 	if err != nil {
 		return fmt.Errorf("initialize verification service: %w", err)

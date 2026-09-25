@@ -3,7 +3,7 @@ SHELL := /bin/sh
 CONFIG_FILE ?= configs/config.dev.yaml
 COMPOSE_FILE := deploy/docker/docker-compose.yml
 
-.PHONY: dev-up dev-down dev-logs run test vet fmt lint migrate-up migrate-down openapi compose-config integration
+.PHONY: dev-up dev-down dev-logs run test vet fmt lint migrate-up migrate-down reindex openapi compose-config integration
 
 dev-up:
 	docker compose -f $(COMPOSE_FILE) --env-file .env.example up -d mysql redis kafka elasticsearch rustfs mailpit
@@ -36,6 +36,9 @@ migrate-up:
 
 migrate-down:
 	go run ./cmd/migrate -direction down
+
+reindex:
+	go run ./cmd/reindex
 
 openapi:
 	@test -s api/openapi.yaml

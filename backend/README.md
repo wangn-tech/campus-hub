@@ -18,6 +18,7 @@ make run
 - `make test`：运行全部 Go 测试。
 - `make lint`：执行格式化和 `go vet`。
 - `make migrate-up` / `make migrate-down`：执行或回滚一条迁移。
+- `make reindex`：从 MySQL 全量重建活动 Elasticsearch 索引，并在成功后切换查询别名；可通过 `go run ./cmd/reindex -- -index activities_v2 -batch-size 200` 指定目标索引和批次。
 - `make compose-config`：校验 Compose 文件和环境变量模板。
 - `make integration`：启动本地中间件并验证迁移、健康检查、认证和 Redis 故障恢复；会停止本次启动的 Compose 服务，但保留本地卷。
 

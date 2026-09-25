@@ -41,14 +41,14 @@ kafka:
   producer_batch_size: 100
   consumer_group: campushub-backend
   chat_delivery_group_prefix: campushub.chat-delivery
-  enable_consumers: true
   realtime_delivery_group_prefix: campushub.realtime-delivery
+  enable_consumers: true
   sasl_enabled: false
 elasticsearch:
   addresses:
     - http://127.0.0.1:19200
   alias: activities
-  index_prefix: campushub
+  index_prefix: activities
   enable_search: true
   request_timeout: 10s
 storage:

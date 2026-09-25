@@ -114,17 +114,17 @@ type SecurityConfig struct {
 }
 
 type KafkaConfig struct {
-	Brokers                 []string `mapstructure:"brokers"`
-	ClientID                string   `mapstructure:"client_id"`
-	ProducerAcks            string   `mapstructure:"producer_acks"`
-	ProducerBatchSize       int      `mapstructure:"producer_batch_size"`
-	ConsumerGroup           string   `mapstructure:"consumer_group"`
-	ChatDeliveryGroupPrefix string   `mapstructure:"chat_delivery_group_prefix"`
+	Brokers                     []string `mapstructure:"brokers"`
+	ClientID                    string   `mapstructure:"client_id"`
+	ProducerAcks                string   `mapstructure:"producer_acks"`
+	ProducerBatchSize           int      `mapstructure:"producer_batch_size"`
+	ConsumerGroup               string   `mapstructure:"consumer_group"`
+	ChatDeliveryGroupPrefix     string   `mapstructure:"chat_delivery_group_prefix"`
 	RealtimeDeliveryGroupPrefix string   `mapstructure:"realtime_delivery_group_prefix"`
-	EnableConsumers         bool     `mapstructure:"enable_consumers"`
-	SASLEnabled             bool     `mapstructure:"sasl_enabled"`
-	Username                string   `mapstructure:"username"`
-	Password                string   `mapstructure:"password"`
+	EnableConsumers             bool     `mapstructure:"enable_consumers"`
+	SASLEnabled                 bool     `mapstructure:"sasl_enabled"`
+	Username                    string   `mapstructure:"username"`
+	Password                    string   `mapstructure:"password"`
 }
 
 type ElasticsearchConfig struct {
@@ -195,12 +195,12 @@ func Load(path string) (Config, error) {
 	v.SetDefault("kafka.producer_batch_size", 100)
 	v.SetDefault("kafka.consumer_group", "campushub-backend")
 	v.SetDefault("kafka.chat_delivery_group_prefix", "campushub.chat-delivery")
-	v.SetDefault("kafka.enable_consumers", true)
 	v.SetDefault("kafka.realtime_delivery_group_prefix", "campushub.realtime-delivery")
+	v.SetDefault("kafka.enable_consumers", true)
 	v.SetDefault("kafka.sasl_enabled", false)
 	v.SetDefault("elasticsearch.addresses", []string{"http://127.0.0.1:19200"})
 	v.SetDefault("elasticsearch.alias", "activities")
-	v.SetDefault("elasticsearch.index_prefix", "campushub")
+	v.SetDefault("elasticsearch.index_prefix", "activities")
 	v.SetDefault("elasticsearch.enable_search", true)
 	v.SetDefault("elasticsearch.request_timeout", "10s")
 	v.SetDefault("storage.driver", "rustfs")

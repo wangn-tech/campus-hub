@@ -66,6 +66,8 @@ func (h *ActivityHandler) Search(c *gin.Context) {
 		CategoryID: c.Query("category_id"),
 		TagID:      c.Query("tag_id"),
 		Location:   c.Query("location"),
+		Distance:   c.Query("distance"),
+		Sort:       c.Query("sort"),
 		Page:       page,
 		PageSize:   pageSize,
 	}
@@ -81,12 +83,45 @@ func (h *ActivityHandler) Search(c *gin.Context) {
 	} else {
 		query.EndTime = value
 	}
-	items, total, err := h.activities.Search(c.Request.Context(), query)
+	if raw := c.Query("status"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			bad(c)
+			return
+		}
+		query.Status = &value
+	}
+	if value, err := optionalFloat(c, "longitude"); err != nil {
+		bad(c)
+		return
+	} else {
+		query.Longitude = value
+	}
+	if value, err := optionalFloat(c, "latitude"); err != nil {
+		bad(c)
+		return
+	} else {
+		query.Latitude = value
+	}
+	items, total, mode, err := h.activities.Search(c.Request.Context(), query)
 	if err != nil {
 		activityError(c, err)
 		return
 	}
+	c.Header("X-Search-Mode", string(mode))
 	httpx.Success(c, pageOf(items, page, pageSize, total))
+}
+
+func optionalFloat(c *gin.Context, key string) (*float64, error) {
+	raw := c.Query(key)
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &value, nil
 }
 
 func (h *ActivityHandler) Detail(c *gin.Context) {

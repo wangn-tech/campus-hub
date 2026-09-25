@@ -201,8 +201,13 @@ HTTP 状态码仍应正确返回，例如 400、401、403、404、429、500。
 - `start_time`；
 - `end_time`；
 - `location`；
+- `status`（仅 `2`、`3`、`4`）；
+- `longitude`、`latitude` 与可选 `distance`（例如 `5km`）；
+- `sort`（`start_time`、`created_at`、`hot`、`distance`）。
 - `page`；
 - `page_size`。
+
+搜索成功响应包含 `X-Search-Mode: elasticsearch` 或 `mysql-fallback`；后者只保证 MySQL 基础筛选，不保证地理距离筛选和排序。
 
 旧路径映射：
 

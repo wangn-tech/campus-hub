@@ -119,16 +119,16 @@ GET /api/v1/activities/search
 | 参数 | 类型 | 说明 |
 |---|---|---|
 | `keyword` | string | 标题、简介、标签、地点关键词 |
-| `category_id` | long | 分类过滤 |
-| `tag_id` | long | 标签过滤 |
-| `status` | int | 活动状态过滤 |
-| `start_time` | datetime | 活动开始时间下限 |
-| `end_time` | datetime | 活动开始时间上限 |
+| `category_id` | UUID | 分类过滤 |
+| `tag_id` | UUID | 标签过滤 |
+| `status` | int | 公开状态：`2` 已发布、`3` 进行中、`4` 已结束 |
+| `start_time` | Unix 毫秒 | 活动开始时间下限 |
+| `end_time` | Unix 毫秒 | 活动开始时间上限 |
 | `location` | string | 地点关键词 |
 | `longitude` | double | 地理中心经度，可选 |
 | `latitude` | double | 地理中心纬度，可选 |
 | `distance` | string | 地理距离，例如 `5km` |
-| `sort` | string | 最新、最热、距离等排序 |
+| `sort` | string | `start_time`、`created_at`、`hot` 或 `distance`；距离排序需同时提供坐标 |
 | `page` | int | 页码 |
 | `page_size` | int | 每页数量 |
 
@@ -279,6 +279,8 @@ flowchart TB
 - 切换别名前校验文档数量和抽样字段；
 - 重建失败时保留旧索引。
 
+**实现（阶段 6）**：使用 `cd backend && make reindex` 执行重建。命令默认创建形如 `${elasticsearch.index_prefix}_v{Unix 时间}`（默认 `activities_v…`）的新物理索引，稳定分页构建后执行 refresh、文档数与前三个确定性样本校验；仅校验成功才原子切换 `activities` alias。切换后再扫描 MySQL 补偿切换窗口内的更新；旧索引不自动删除，方便回滚与人工核验。
+
 ## 10. 降级策略
 
 Elasticsearch 不可用时：
@@ -288,6 +290,8 @@ Elasticsearch 不可用时：
 3. 暂时关闭复杂聚合、地理查询和深度搜索；
 4. 返回响应头或日志标记搜索降级；
 5. ES 恢复后通过补偿任务重新同步缺失数据。
+
+**实现（阶段 6）**：`GET /api/v1/activities/search` 优先查询 `activities` alias；ES 请求报错、alias 不存在、索引尚未命中或命中已过期 UUID 时自动回退 MySQL 的标题、地点、分类、标签与时间范围查询，保持统一的分页响应，并返回 `X-Search-Mode: elasticsearch` 或 `mysql-fallback`。MySQL 降级不承诺地理距离过滤或排序。
 
 ## 11. Docker 规划
 
