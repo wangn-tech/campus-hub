@@ -102,6 +102,7 @@ func run() error {
 	registrationRepository := repository.NewRegistrationRepository(db)
 	ticketRepository := repository.NewTicketRepository(db)
 	checkInRepository := repository.NewCheckInRepository(db)
+	outboxRepository := repository.NewOutboxRepository(db)
 	verificationRepository := repository.NewVerificationRepository(db)
 	authService := service.NewAuthService(userRepository, token.NewManager(cfg.JWT), redisClient, mailpkg.New(cfg.Mail))
 	authHandler := handler.NewAuthHandler(authService)
@@ -113,11 +114,12 @@ func run() error {
 	registrationHandler := handler.NewRegistrationHandler(registrationService, userService)
 	checkInService := service.NewCheckInService(checkInRepository, ticketRepository, activityRepository, userRepository)
 	checkInHandler := handler.NewCheckInHandler(checkInService, userService)
+	outboxRelay := service.NewOutboxRelay(outboxRepository, kafkaClient)
 	verificationService, err := service.NewVerificationService(verificationRepository, fileRepository, cfg.Security)
 	if err != nil {
 		return fmt.Errorf("initialize verification service: %w", err)
 	}
-	scheduler, err := startActivityScheduler(activityService, registrationService, checkInService, cfg.Activity.SchedulerInterval, logger)
+	scheduler, err := startActivityScheduler(activityService, registrationService, checkInService, outboxRelay, cfg.Activity.SchedulerInterval, logger)
 	if err != nil {
 		return err
 	}
@@ -125,7 +127,7 @@ func run() error {
 	readiness := health.New(cfg.Observability.ReadinessTimeout,
 		health.CheckFunc{CheckName: "mysql", Fn: func(ctx context.Context) error { return database.Check(ctx, db) }},
 		health.CheckFunc{CheckName: "redis", Fn: func(ctx context.Context) error { return redispkg.Check(ctx, redisClient) }},
-		health.CheckFunc{CheckName: "kafka", Fn: func(ctx context.Context) error { return kafkapkg.Check(ctx, kafkaClient) }},
+		health.CheckFunc{CheckName: "kafka", Fn: func(ctx context.Context) error { return kafkaClient.Check(ctx) }},
 		health.CheckFunc{CheckName: "elasticsearch", Fn: func(ctx context.Context) error { return esClient.Check(ctx) }},
 	)
 	engine := router.New(router.Dependencies{
@@ -176,9 +178,10 @@ func run() error {
 	return nil
 }
 
-// startActivityScheduler runs the periodic activity maintenance tasks: the time
-// based activity status flow, pending registration expiry and ticket expiry.
-func startActivityScheduler(activities *service.ActivityService, registrations *service.RegistrationService, checkIns *service.CheckInService, interval time.Duration, logger *zap.Logger) (*cron.Cron, error) {
+// startActivityScheduler runs the periodic maintenance tasks: the time based
+// activity status flow, pending registration expiry, ticket expiry and outbox
+// delivery.
+func startActivityScheduler(activities *service.ActivityService, registrations *service.RegistrationService, checkIns *service.CheckInService, relay *service.OutboxRelay, interval time.Duration, logger *zap.Logger) (*cron.Cron, error) {
 	runner := cron.New()
 	if _, err := runner.AddFunc("@every "+interval.String(), func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -200,6 +203,12 @@ func startActivityScheduler(activities *service.ActivityService, registrations *
 			logger.Warn("ticket expiry failed", zap.Error(err))
 		} else if tickets > 0 {
 			logger.Info("tickets expired", zap.Int64("expired", tickets))
+		}
+		delivered, failed, err := relay.Run(ctx)
+		if err != nil {
+			logger.Warn("outbox relay failed", zap.Error(err))
+		} else if delivered > 0 || failed > 0 {
+			logger.Info("outbox relayed", zap.Int("delivered", delivered), zap.Int("failed", failed))
 		}
 	}); err != nil {
 		return nil, fmt.Errorf("schedule activity maintenance: %w", err)
