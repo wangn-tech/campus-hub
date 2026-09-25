@@ -10,18 +10,30 @@ CampusHub 是校园活动与票据核销平台，覆盖活动发布与审核、�
 - **异步与实时**：业务事务同时写入 Outbox，Relay 可靠投递 Kafka；消费者驱动通知、活动索引和跨实例 WebSocket 广播。WebSocket 仅负责实时提示，断线后由 HTTP 接口补偿。
 - **搜索与文件**：Elasticsearch 保存活动搜索读模型，异常或索引未就绪时自动回退 MySQL；RustFS 存储活动图片和认证文件。
 
-```text
-H5 SSR / 微信小程序
-       │ HTTP / WebSocket
-       ▼
-Go + Gin ───────────────► MySQL（业务数据、状态日志、Outbox）
-   │  │                         │
-   │  ├──► Ristretto → Redis    └──► Outbox Relay → Kafka
-   │  │                                                  ├──► ES 索引器 → Elasticsearch
-   │  ├──► RustFS（私有文件）                          ├──► 通知消费者
-   │  └──► WebSocket Hub ◄─────────────────────────────└──► 实例级实时广播
-   │
-   └──► ES 查询失败/未就绪时回退 MySQL
+```mermaid
+flowchart TB
+    client[H5 SSR / 微信小程序]
+    api[Go + Gin API]
+    ws[WebSocket Hub]
+    mysql[(MySQL<br/>业务数据、状态日志、Outbox)]
+    cache[Ristretto 本地缓存 → Redis]
+    storage[RustFS 私有对象存储]
+    relay[Outbox Relay]
+    kafka[(Kafka)]
+    indexer[活动索引消费者]
+    es[(Elasticsearch<br/>活动搜索读模型)]
+    notifier[通知 / 实时事件消费者]
+
+    client -->|HTTP| api
+    client <-->|WebSocket| ws
+    api --> cache
+    api --> mysql
+    api --> storage
+    api -->|搜索| es
+    api -. ES 不可用或索引未就绪 .-> mysql
+    mysql --> relay --> kafka
+    kafka --> indexer --> es
+    kafka --> notifier --> ws
 ```
 
 ## 本地启动
@@ -48,7 +60,7 @@ git submodule update --init --recursive
 
 ### 2. 启动后端及依赖
 
-Compose 仅启动本地依赖，Go 服务运行在宿主机。`.env` 仅用于本地开发，禁止提交真实密钥。
+Compose 仅启动本地依赖，Go 服务运行在宿主机。`.env` 仅用于本地开发，禁止提交真实密钥；中间件健康检查通过后再执行迁移和索引重建。
 
 ```sh
 cd backend
@@ -101,6 +113,8 @@ EOF
 npm run dev:h5:ssr
 npm run dev:mp-weixin
 ```
+
+微信小程序构建产物位于 `frontend/dist/dev/mp-weixin`，使用微信开发者工具导入该目录即可调试。
 
 生产构建与类型检查：
 
