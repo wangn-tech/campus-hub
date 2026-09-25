@@ -283,6 +283,35 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/UUID'}]
       responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}}
+  /api/v1/check-ins:
+    post:
+      operationId: checkInTicket
+      description: Organizer or administrator only. Supply either `code` or `ticket_id`; `client_request_id` makes the call idempotent.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_request_id]
+              properties:
+                code: {type: string}
+                ticket_id: {type: string, format: uuid}
+                activity_id: {type: string, format: uuid}
+                longitude: {type: number, format: double}
+                latitude: {type: number, format: double}
+                client_request_id: {type: string, maxLength: 64}
+      responses: {'200': {$ref: '#/components/responses/Success'}, '400': {$ref: '#/components/responses/Error'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
+    get:
+      operationId: listCheckIns
+      description: Organizer or administrator only.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: activity_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 50}}
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}

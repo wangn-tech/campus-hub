@@ -101,6 +101,7 @@ func run() error {
 	activityRepository := repository.NewActivityRepository(db)
 	registrationRepository := repository.NewRegistrationRepository(db)
 	ticketRepository := repository.NewTicketRepository(db)
+	checkInRepository := repository.NewCheckInRepository(db)
 	verificationRepository := repository.NewVerificationRepository(db)
 	authService := service.NewAuthService(userRepository, token.NewManager(cfg.JWT), redisClient, mailpkg.New(cfg.Mail))
 	authHandler := handler.NewAuthHandler(authService)
@@ -110,11 +111,13 @@ func run() error {
 	activityHandler := handler.NewActivityHandler(activityService, userService)
 	registrationService := service.NewRegistrationService(registrationRepository, ticketRepository, activityRepository, userRepository, fileRepository, verificationRepository, fileService)
 	registrationHandler := handler.NewRegistrationHandler(registrationService, userService)
+	checkInService := service.NewCheckInService(checkInRepository, ticketRepository, activityRepository, userRepository)
+	checkInHandler := handler.NewCheckInHandler(checkInService, userService)
 	verificationService, err := service.NewVerificationService(verificationRepository, fileRepository, cfg.Security)
 	if err != nil {
 		return fmt.Errorf("initialize verification service: %w", err)
 	}
-	scheduler, err := startActivityScheduler(activityService, registrationService, cfg.Activity.SchedulerInterval, logger)
+	scheduler, err := startActivityScheduler(activityService, registrationService, checkInService, cfg.Activity.SchedulerInterval, logger)
 	if err != nil {
 		return err
 	}
@@ -132,6 +135,7 @@ func run() error {
 		VerificationHandler: handler.NewVerificationHandler(verificationService, userService),
 		ActivityHandler:     activityHandler,
 		RegistrationHandler: registrationHandler,
+		CheckInHandler:      checkInHandler,
 		Authenticator:       authService,
 		AdminChecker:        authService,
 		Readiness:           readiness,
@@ -173,9 +177,8 @@ func run() error {
 }
 
 // startActivityScheduler runs the periodic activity maintenance tasks: the time
-// based activity status flow and pending registration expiry. Later stages add
-// ticket expiry to the same runner.
-func startActivityScheduler(activities *service.ActivityService, registrations *service.RegistrationService, interval time.Duration, logger *zap.Logger) (*cron.Cron, error) {
+// based activity status flow, pending registration expiry and ticket expiry.
+func startActivityScheduler(activities *service.ActivityService, registrations *service.RegistrationService, checkIns *service.CheckInService, interval time.Duration, logger *zap.Logger) (*cron.Cron, error) {
 	runner := cron.New()
 	if _, err := runner.AddFunc("@every "+interval.String(), func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -191,6 +194,12 @@ func startActivityScheduler(activities *service.ActivityService, registrations *
 			logger.Warn("registration expiry failed", zap.Error(err))
 		} else if expired > 0 {
 			logger.Info("registrations expired", zap.Int64("expired", expired))
+		}
+		tickets, err := checkIns.ExpireTickets(ctx)
+		if err != nil {
+			logger.Warn("ticket expiry failed", zap.Error(err))
+		} else if tickets > 0 {
+			logger.Info("tickets expired", zap.Int64("expired", tickets))
 		}
 	}); err != nil {
 		return nil, fmt.Errorf("schedule activity maintenance: %w", err)

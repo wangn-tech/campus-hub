@@ -18,6 +18,7 @@ type Dependencies struct {
 	VerificationHandler *handler.VerificationHandler
 	ActivityHandler     *handler.ActivityHandler
 	RegistrationHandler *handler.RegistrationHandler
+	CheckInHandler      *handler.CheckInHandler
 	Authenticator       middleware.Authenticator
 	AdminChecker        middleware.AdminChecker
 	Readiness           *health.Service
@@ -62,7 +63,7 @@ func New(dependencies Dependencies) *gin.Engine {
 		}
 		detail.GET("/activities/:id", dependencies.ActivityHandler.Detail)
 	}
-	if dependencies.Authenticator == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil || dependencies.ActivityHandler == nil || dependencies.RegistrationHandler == nil {
+	if dependencies.Authenticator == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil || dependencies.ActivityHandler == nil || dependencies.RegistrationHandler == nil || dependencies.CheckInHandler == nil {
 		return r
 	}
 	protected := r.Group("/api/v1")
@@ -94,6 +95,8 @@ func New(dependencies Dependencies) *gin.Engine {
 	protected.GET("/users/me/activities/registered", dependencies.RegistrationHandler.MyRegistrations)
 	protected.GET("/tickets", dependencies.RegistrationHandler.MyTickets)
 	protected.GET("/tickets/:id", dependencies.RegistrationHandler.Ticket)
+	protected.POST("/check-ins", dependencies.CheckInHandler.CheckIn)
+	protected.GET("/check-ins", dependencies.CheckInHandler.List)
 	if dependencies.AdminChecker != nil {
 		admin := protected.Group("")
 		admin.Use(middleware.RequireAdmin(dependencies.AdminChecker))

@@ -78,6 +78,7 @@ func (stubAdminChecker) IsAdmin(context.Context, string) (bool, error) { return 
 func TestActivityRoutesAreRegistered(t *testing.T) {
 	activityService := service.NewActivityService(nil, nil, nil, nil, nil, nil)
 	registrationService := service.NewRegistrationService(nil, nil, nil, nil, nil, nil, nil)
+	checkInService := service.NewCheckInService(nil, nil, nil, nil)
 	userService := service.NewUserService(nil, nil, nil)
 	engine := New(Dependencies{
 		AuthHandler:         handler.NewAuthHandler(nil),
@@ -86,6 +87,7 @@ func TestActivityRoutesAreRegistered(t *testing.T) {
 		VerificationHandler: handler.NewVerificationHandler(nil, userService),
 		ActivityHandler:     handler.NewActivityHandler(activityService, userService),
 		RegistrationHandler: handler.NewRegistrationHandler(registrationService, userService),
+		CheckInHandler:      handler.NewCheckInHandler(checkInService, userService),
 		Authenticator:       stubAuthenticator{},
 		AdminChecker:        stubAdminChecker{},
 		Readiness:           health.New(time.Second),
@@ -115,6 +117,8 @@ func TestActivityRoutesAreRegistered(t *testing.T) {
 		"GET /api/v1/users/me/activities/registered",
 		"GET /api/v1/tickets",
 		"GET /api/v1/tickets/:id",
+		"POST /api/v1/check-ins",
+		"GET /api/v1/check-ins",
 		"POST /api/v1/activities/:id/approve",
 		"POST /api/v1/activities/:id/reject",
 		"POST /api/v1/activities/:id/send-back",
