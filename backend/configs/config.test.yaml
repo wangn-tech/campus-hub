@@ -45,9 +45,9 @@ elasticsearch:
   enable_search: true
   request_timeout: 10s
 storage:
-  driver: minio
+  driver: rustfs
   endpoint: 127.0.0.1:19000
-  access_key: minioadmin
+  access_key: rustfsadmin
   secret_key: change-me
   bucket: campushub-test
   use_path_style: true

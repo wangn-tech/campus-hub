@@ -53,7 +53,7 @@ wait_for_status() {
 }
 
 echo "Starting Compose dependencies"
-"${compose[@]}" up --detach --wait --wait-timeout 180 mysql redis kafka elasticsearch minio mailpit
+"${compose[@]}" up --detach --wait --wait-timeout 180 mysql redis kafka elasticsearch rustfs mailpit
 echo "Applying migrations"
 go run ./cmd/migrate -direction up
 echo "Building and starting backend"
@@ -83,16 +83,16 @@ grep -q 'access_token' "${temporary_dir}/login.json"
 access_token="$(sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p' "${temporary_dir}/login.json")"
 [[ -n "${access_token}" ]]
 
-echo "Verifying private MinIO upload and recovery"
+echo "Verifying private RustFS upload and recovery"
 printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' | base64 --decode >"${temporary_dir}/image.png"
 upload_status="$(curl --silent --show-error --output "${temporary_dir}/upload.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/files/images" --header "Authorization: Bearer ${access_token}" --form "file=@${temporary_dir}/image.png;type=image/png" --form 'biz_type=avatar')"
 [[ "${upload_status}" == "200" ]]
 grep -q 'access_url' "${temporary_dir}/upload.json"
-"${compose[@]}" stop minio
+"${compose[@]}" stop rustfs
 upload_down_status="$(curl --silent --show-error --output "${temporary_dir}/upload-down.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/files/images" --header "Authorization: Bearer ${access_token}" --form "file=@${temporary_dir}/image.png;type=image/png" --form 'biz_type=avatar' || true)"
 [[ "${upload_down_status}" == "503" ]]
-"${compose[@]}" start minio
-"${compose[@]}" up --detach --wait --wait-timeout 60 minio
+"${compose[@]}" start rustfs
+"${compose[@]}" up --detach --wait --wait-timeout 60 rustfs
 upload_recovered_status="$(curl --silent --show-error --output "${temporary_dir}/upload-recovered.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/files/images" --header "Authorization: Bearer ${access_token}" --form "file=@${temporary_dir}/image.png;type=image/png" --form 'biz_type=avatar')"
 [[ "${upload_recovered_status}" == "200" ]]
 

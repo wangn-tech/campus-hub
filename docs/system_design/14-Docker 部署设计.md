@@ -31,7 +31,7 @@
 |---|---|---|
 | `kibana` | `search` | ES 查询和索引调试 |
 | `kafka-ui` | `mq` | Kafka Topic、消息和消费者组调试 |
-| `minio` | `storage` | 本地 S3 对象存储 |
+| `rustfs` | `storage` | 本地 S3 对象存储 |
 | `prometheus` | `monitoring` | 指标采集 |
 | `grafana` | `monitoring` | 指标展示 |
 
@@ -62,7 +62,7 @@ campushub-net
 - `redis:6379`；
 - `kafka:9092`；
 - `elasticsearch:9200`；
-- `minio:9000`。
+- `rustfs:9000`。
 
 后端容器只暴露必要端口，中间件端口可只在开发环境映射到宿主机。
 
@@ -74,7 +74,7 @@ campushub-net
 | `redis-data` | redis | Redis 持久化数据 |
 | `kafka-data` | kafka | Kafka 数据 |
 | `elasticsearch-data` | elasticsearch | ES 数据 |
-| `minio-data` | minio | 文件数据 |
+| `rustfs-data` | rustfs | 文件数据 |
 | `prometheus-data` | prometheus | 监控数据 |
 | `grafana-data` | grafana | 仪表盘数据 |
 
@@ -160,7 +160,7 @@ campushub-net
 
 生产环境应使用独立 ES 集群或托管服务，并配置副本、快照和访问控制。
 
-## 12. MinIO 容器
+## 12. RustFS 容器
 
 配置要点：
 
@@ -181,7 +181,7 @@ campushub-net
 | redis | ping |
 | kafka | Broker 健康命令或端口检查 |
 | elasticsearch | 集群健康接口 |
-| minio | 存活探针 |
+| rustfs | 存活探针 |
 | kibana | HTTP 状态接口 |
 
 ### 13.2 依赖关系
@@ -192,7 +192,7 @@ campushub-net
 - Redis；
 - Kafka；
 - Elasticsearch；
-- MinIO，如启用。
+- RustFS，如启用。
 
 Compose 可配置 `depends_on` 和条件健康检查，但应用自身也应具备连接重试能力。
 
@@ -205,7 +205,7 @@ Compose 可配置 `depends_on` 和条件健康检查，但应用自身也应具�
 3. 初始化必要字典数据；
 4. 启动后端服务；
 5. 启动前端或使用已有前端子模块；
-6. 按需启动 Kibana、Kafka UI、MinIO 控制台。
+6. 按需启动 Kibana、Kafka UI、RustFS 控制台。
 
 ## 15. 生产部署注意事项
 
@@ -241,7 +241,7 @@ Compose 可配置 `depends_on` 和条件健康检查，但应用自身也应具�
 - Redis 密码；
 - Kafka 监听配置；
 - ES 内存和安全配置；
-- MinIO 凭证；
+- RustFS 凭证；
 - 后端配置覆盖；
 - Compose Profile。
 

@@ -180,9 +180,9 @@ func Load(path string) (Config, error) {
 	v.SetDefault("elasticsearch.index_prefix", "campushub")
 	v.SetDefault("elasticsearch.enable_search", true)
 	v.SetDefault("elasticsearch.request_timeout", "10s")
-	v.SetDefault("storage.driver", "minio")
+	v.SetDefault("storage.driver", "rustfs")
 	v.SetDefault("storage.endpoint", "127.0.0.1:19000")
-	v.SetDefault("storage.access_key", "minioadmin")
+	v.SetDefault("storage.access_key", "rustfsadmin")
 	v.SetDefault("storage.secret_key", "change-me")
 	v.SetDefault("storage.bucket", "campushub")
 	v.SetDefault("storage.use_path_style", true)
@@ -262,8 +262,8 @@ func (c Config) Validate() error {
 	if c.JWT.AccessTTL <= 0 || c.JWT.RefreshTTL <= 0 {
 		return fmt.Errorf("jwt token ttl must be positive")
 	}
-	if c.Storage.Driver != "minio" || c.Storage.Endpoint == "" || c.Storage.AccessKey == "" || c.Storage.SecretKey == "" || c.Storage.Bucket == "" || c.Storage.PresignTTL <= 0 || c.Storage.MaxImageSize <= 0 {
-		return fmt.Errorf("valid minio storage configuration is required")
+	if c.Storage.Driver != "rustfs" || c.Storage.Endpoint == "" || c.Storage.AccessKey == "" || c.Storage.SecretKey == "" || c.Storage.Bucket == "" || c.Storage.PresignTTL <= 0 || c.Storage.MaxImageSize <= 0 {
+		return fmt.Errorf("valid rustfs storage configuration is required")
 	}
 	if c.Mail.Host == "" || c.Mail.Port < 1 || c.Mail.Port > 65535 || c.Mail.From == "" || (c.Mail.TLSMode != "none" && c.Mail.TLSMode != "starttls") {
 		return fmt.Errorf("mail configuration is invalid")

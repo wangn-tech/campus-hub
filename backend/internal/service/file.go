@@ -50,11 +50,11 @@ func (s *FileService) UploadImage(ctx context.Context, user *model.User, name, b
 	}
 	id := uuid.NewString()
 	key := fmt.Sprintf("images/%s/%s/%s.%s", biz, time.Now().UTC().Format("2006/01"), id, ext)
-	if _, e = s.storage.Put(ctx, key, bytes.NewReader(b), int64(len(b)), mime); e != nil {
+	if e = s.storage.Put(ctx, key, bytes.NewReader(b), int64(len(b)), mime); e != nil {
 		return nil, "", fmt.Errorf("%w: %v", ErrStorageUnavailable, e)
 	}
 	hash := sha256.Sum256(b)
-	f := &model.File{UUID: id, StorageDriver: "minio", Bucket: s.bucket, ObjectKey: key, OriginName: filepath.Base(name), BizType: biz, FileSize: uint64(len(b)), MIMEType: mime, Extension: ext, SHA256: hex.EncodeToString(hash[:]), UploaderID: user.ID, Status: 1}
+	f := &model.File{UUID: id, StorageDriver: "rustfs", Bucket: s.bucket, ObjectKey: key, OriginName: filepath.Base(name), BizType: biz, FileSize: uint64(len(b)), MIMEType: mime, Extension: ext, SHA256: hex.EncodeToString(hash[:]), UploaderID: user.ID, Status: 1}
 	if e = s.repo.Create(ctx, f); e != nil {
 		_ = s.storage.Remove(ctx, key)
 		return nil, "", e
