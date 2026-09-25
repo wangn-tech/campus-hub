@@ -68,7 +68,12 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	httpx.Success(c, gin.H{"tokens": t})
 }
 func (h *AuthHandler) Logout(c *gin.Context) {
-	if e := h.service.Logout(c.Request.Context(), c.GetHeader("Authorization")[7:]); e != nil {
+	raw, ok := middleware.BearerToken(c)
+	if !ok {
+		authError(c, service.ErrInvalidCredentials)
+		return
+	}
+	if e := h.service.Logout(c.Request.Context(), raw); e != nil {
 		authError(c, e)
 		return
 	}

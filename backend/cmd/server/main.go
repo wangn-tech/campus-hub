@@ -23,6 +23,7 @@ import (
 	"github.com/wangn-tech/campus-hub/internal/repository"
 	"github.com/wangn-tech/campus-hub/internal/router"
 	"github.com/wangn-tech/campus-hub/internal/service"
+	"github.com/wangn-tech/campus-hub/internal/token"
 	"go.uber.org/zap"
 )
 
@@ -83,7 +84,7 @@ func run() error {
 	}()
 	storageClient, err := storagepkg.Open(cfg.Storage)
 	if err != nil {
-		return fmt.Errorf("open minio: %w", err)
+		return fmt.Errorf("open rustfs: %w", err)
 	}
 
 	if cfg.App.Env == "prod" {
@@ -95,7 +96,7 @@ func run() error {
 	fileRepository := repository.NewFileRepository(db)
 	tagRepository := repository.NewTagRepository(db)
 	verificationRepository := repository.NewVerificationRepository(db)
-	authService := service.NewAuthService(userRepository, cfg.JWT, redisClient, mailpkg.New(cfg.Mail))
+	authService := service.NewAuthService(userRepository, token.NewManager(cfg.JWT), redisClient, mailpkg.New(cfg.Mail))
 	authHandler := handler.NewAuthHandler(authService)
 	userService := service.NewUserService(userRepository, tagRepository, fileRepository)
 	fileService := service.NewFileService(fileRepository, storageClient, cfg.Storage)

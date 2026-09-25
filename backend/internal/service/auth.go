@@ -11,13 +11,12 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
-	"github.com/wangn-tech/campus-hub/internal/config"
 	"github.com/wangn-tech/campus-hub/internal/model"
 	mailpkg "github.com/wangn-tech/campus-hub/internal/platform/mail"
 	"github.com/wangn-tech/campus-hub/internal/repository"
+	"github.com/wangn-tech/campus-hub/internal/token"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -30,24 +29,18 @@ var (
 )
 
 type AuthService struct {
-	users     *repository.UserRepository
-	jwtConfig config.JWTConfig
-	redis     *redis.Client
-	mail      mailpkg.Sender
-	validate  *validator.Validate
+	users    *repository.UserRepository
+	tokens   *token.Manager
+	redis    *redis.Client
+	mail     mailpkg.Sender
+	validate *validator.Validate
 }
 
-func NewAuthService(users *repository.UserRepository, jwtConfig config.JWTConfig, dependencies ...any) *AuthService {
-	s := &AuthService{users: users, jwtConfig: jwtConfig, validate: validator.New()}
-	for _, d := range dependencies {
-		switch v := d.(type) {
-		case *redis.Client:
-			s.redis = v
-		case mailpkg.Sender:
-			s.mail = v
-		}
-	}
-	return s
+// NewAuthService wires the auth service against its explicit collaborators:
+// the user repository, the token signer, the Redis client used for session
+// state, and the mail sender used for verification codes.
+func NewAuthService(users *repository.UserRepository, tokens *token.Manager, redisClient *redis.Client, mailSender mailpkg.Sender) *AuthService {
+	return &AuthService{users: users, tokens: tokens, redis: redisClient, mail: mailSender, validate: validator.New()}
 }
 
 type RegisterInput struct {
@@ -59,11 +52,6 @@ type RegisterInput struct {
 type LoginInput struct {
 	Email    string `json:"email" validate:"required,email"`
 	Password string `json:"password" validate:"required"`
-}
-type TokenPair struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int64  `json:"expires_in"`
 }
 type RefreshInput struct {
 	RefreshToken string `json:"refresh_token" validate:"required"`
@@ -96,7 +84,7 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*model.Us
 	}
 	return u, nil
 }
-func (s *AuthService) Login(ctx context.Context, in LoginInput) (*model.User, *TokenPair, error) {
+func (s *AuthService) Login(ctx context.Context, in LoginInput) (*model.User, *token.Pair, error) {
 	if err := s.validate.Struct(in); err != nil {
 		return nil, nil, err
 	}
@@ -110,7 +98,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*model.User, *T
 		return nil, nil, ErrInvalidCredentials
 	}
 	_ = s.redisDel(ctx, "campushub:auth:login-fail:"+email)
-	pair, err := s.issueTokens(u, ctx)
+	pair, err := s.issueTokens(ctx, u)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -121,43 +109,35 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*model.User, *T
 	}
 	return u, pair, nil
 }
-func (s *AuthService) Refresh(ctx context.Context, raw string) (*TokenPair, error) {
-	claims, err := s.parse(raw, true)
-	if err != nil {
-		return nil, ErrInvalidCredentials
-	}
-	sub, jti, _, err := claimsData(claims)
+func (s *AuthService) Refresh(ctx context.Context, raw string) (*token.Pair, error) {
+	claims, err := s.tokens.ParseRefresh(raw)
 	if err != nil || s.redis == nil {
 		return nil, ErrInvalidCredentials
 	}
-	saved, err := s.redis.GetDel(ctx, "campushub:auth:refresh:"+jti).Result()
+	saved, err := s.redis.GetDel(ctx, "campushub:auth:refresh:"+claims.ID).Result()
 	if err != nil || saved != tokenHash(raw) {
-		_ = s.RevokeAll(ctx, sub)
+		_ = s.RevokeAll(ctx, claims.Subject)
 		return nil, ErrInvalidCredentials
 	}
-	u, err := s.users.FindByUUID(ctx, sub)
+	u, err := s.users.FindByUUID(ctx, claims.Subject)
 	if err != nil || u.Status != 1 {
 		return nil, ErrInvalidCredentials
 	}
-	return s.issueTokens(u, ctx)
+	return s.issueTokens(ctx, u)
 }
 func (s *AuthService) Logout(ctx context.Context, raw string) error {
-	claims, err := s.parse(raw, false)
-	if err != nil {
-		return ErrInvalidCredentials
-	}
-	sub, jti, exp, err := claimsData(claims)
+	claims, err := s.tokens.ParseAccess(raw)
 	if err != nil {
 		return ErrInvalidCredentials
 	}
 	if s.redis != nil {
-		ttl := time.Until(time.Unix(exp, 0))
+		ttl := time.Until(time.Unix(claims.ExpiresAt, 0))
 		if ttl > 0 {
-			if err = s.redis.Set(ctx, "campushub:auth:blacklist:"+jti, "1", ttl).Err(); err != nil {
+			if err = s.redis.Set(ctx, "campushub:auth:blacklist:"+claims.ID, "1", ttl).Err(); err != nil {
 				return err
 			}
 		}
-		return s.RevokeAll(ctx, sub)
+		return s.RevokeAll(ctx, claims.Subject)
 	}
 	return nil
 }
@@ -268,30 +248,25 @@ func (s *AuthService) VerifyEmailCode(ctx context.Context, email, scene, code st
 	return err
 }
 func (s *AuthService) Authenticate(ctx context.Context, raw string) (string, error) {
-	claims, err := s.parse(raw, false)
-	if err != nil {
-		return "", ErrInvalidCredentials
-	}
-	sub, jti, _, err := claimsData(claims)
+	claims, err := s.tokens.ParseAccess(raw)
 	if err != nil {
 		return "", ErrInvalidCredentials
 	}
 	if s.redis != nil {
-		if _, err = s.redis.Get(ctx, "campushub:auth:blacklist:"+jti).Result(); err == nil {
+		if _, err = s.redis.Get(ctx, "campushub:auth:blacklist:"+claims.ID).Result(); err == nil {
 			return "", ErrInvalidCredentials
 		} else if !errors.Is(err, redis.Nil) {
 			return "", err
 		}
 	}
-	return sub, nil
+	return claims.Subject, nil
 }
 func (s *AuthService) ParseAccessToken(raw string) (string, error) {
-	claims, err := s.parse(raw, false)
+	claims, err := s.tokens.ParseAccess(raw)
 	if err != nil {
 		return "", ErrInvalidCredentials
 	}
-	sub, _, _, err := claimsData(claims)
-	return sub, err
+	return claims.Subject, nil
 }
 func (s *AuthService) RevokeAll(ctx context.Context, sub string) error {
 	if s.redis == nil {
@@ -310,64 +285,21 @@ func (s *AuthService) RevokeAll(ctx context.Context, sub string) error {
 	_, err = p.Exec(ctx)
 	return err
 }
-func (s *AuthService) issueTokens(u *model.User, contexts ...context.Context) (*TokenPair, error) {
-	ctx := context.Background()
-	if len(contexts) > 0 {
-		ctx = contexts[0]
-	}
-	now := time.Now().UTC()
-	access, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": u.UUID, "jti": uuid.NewString(), "iss": s.jwtConfig.Issuer, "iat": now.Unix(), "exp": now.Add(s.jwtConfig.AccessTTL).Unix()}).SignedString([]byte(s.jwtConfig.AccessSecret))
-	if err != nil {
-		return nil, err
-	}
-	rid := uuid.NewString()
-	refresh, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": u.UUID, "jti": rid, "iss": s.jwtConfig.Issuer, "typ": "refresh", "iat": now.Unix(), "exp": now.Add(s.jwtConfig.RefreshTTL).Unix()}).SignedString([]byte(s.jwtConfig.RefreshSecret))
+func (s *AuthService) issueTokens(ctx context.Context, u *model.User) (*token.Pair, error) {
+	pair, refreshID, err := s.tokens.Issue(u.UUID)
 	if err != nil {
 		return nil, err
 	}
 	if s.redis != nil {
 		p := s.redis.Pipeline()
-		p.Set(ctx, "campushub:auth:refresh:"+rid, tokenHash(refresh), s.jwtConfig.RefreshTTL)
-		p.SAdd(ctx, "campushub:auth:refresh-user:"+u.UUID, rid)
-		p.Expire(ctx, "campushub:auth:refresh-user:"+u.UUID, s.jwtConfig.RefreshTTL)
+		p.Set(ctx, "campushub:auth:refresh:"+refreshID, tokenHash(pair.RefreshToken), s.tokens.RefreshTTL())
+		p.SAdd(ctx, "campushub:auth:refresh-user:"+u.UUID, refreshID)
+		p.Expire(ctx, "campushub:auth:refresh-user:"+u.UUID, s.tokens.RefreshTTL())
 		if _, err = p.Exec(ctx); err != nil {
 			return nil, err
 		}
 	}
-	return &TokenPair{AccessToken: access, RefreshToken: refresh, ExpiresIn: int64(s.jwtConfig.AccessTTL.Seconds())}, nil
-}
-func (s *AuthService) parse(raw string, refresh bool) (jwt.MapClaims, error) {
-	secret := s.jwtConfig.AccessSecret
-	if refresh {
-		secret = s.jwtConfig.RefreshSecret
-	}
-	t, err := jwt.Parse(raw, func(t *jwt.Token) (any, error) {
-		if t.Method != jwt.SigningMethodHS256 {
-			return nil, errors.New("unexpected signing method")
-		}
-		return []byte(secret), nil
-	}, jwt.WithIssuer(s.jwtConfig.Issuer))
-	if err != nil || !t.Valid {
-		return nil, ErrInvalidCredentials
-	}
-	c, ok := t.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, ErrInvalidCredentials
-	}
-	typ, _ := c["typ"].(string)
-	if refresh != (typ == "refresh") {
-		return nil, ErrInvalidCredentials
-	}
-	return c, nil
-}
-func claimsData(c jwt.MapClaims) (string, string, int64, error) {
-	sub, _ := c["sub"].(string)
-	jti, _ := c["jti"].(string)
-	exp, ok := c["exp"].(float64)
-	if sub == "" || jti == "" || !ok {
-		return "", "", 0, ErrInvalidCredentials
-	}
-	return sub, jti, int64(exp), nil
+	return pair, nil
 }
 func (s *AuthService) loginAllowed(ctx context.Context, email string) error {
 	if s.redis == nil {
