@@ -130,6 +130,7 @@ campushub.{domain}.events.v1
 - `registration.approved`；
 - `registration.rejected`；
 - `registration.cancelled`；
+- `registration.expired`；
 - `registration.failed`。
 
 ### 6.3 票据事件

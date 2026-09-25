@@ -61,3 +61,45 @@ func TestApprovalDeadline(t *testing.T) {
 		t.Fatalf("approvalDeadline = %s, want %s", got, soon)
 	}
 }
+
+func TestRegistrationStatusFilter(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+		ok   bool
+	}{
+		{in: "", want: -1, ok: true},
+		{in: "pending", want: int(model.RegistrationPending), ok: true},
+		{in: "approved", want: int(model.RegistrationApproved), ok: true},
+		{in: "expired", want: int(model.RegistrationExpired), ok: true},
+		{in: "bogus", ok: false},
+	}
+	for _, tc := range cases {
+		statuses, ok := registrationStatusFilter(tc.in)
+		if ok != tc.ok {
+			t.Fatalf("registrationStatusFilter(%q) ok = %v, want %v", tc.in, ok, tc.ok)
+		}
+		if !ok {
+			continue
+		}
+		if tc.want < 0 {
+			if statuses != nil {
+				t.Fatalf("empty filter should mean all statuses, got %v", statuses)
+			}
+			continue
+		}
+		if len(statuses) != 1 || statuses[0] != tc.want {
+			t.Fatalf("registrationStatusFilter(%q) = %v, want [%d]", tc.in, statuses, tc.want)
+		}
+	}
+}
+
+func TestReviewOperatorType(t *testing.T) {
+	activity := &model.Activity{OrganizerID: 7}
+	if got := reviewOperatorType(activity, &model.User{ID: 7}); got != model.RegistrationOperatorOrganizer {
+		t.Fatalf("organizer action recorded as %d", got)
+	}
+	if got := reviewOperatorType(activity, &model.User{ID: 9}); got != model.RegistrationOperatorAdmin {
+		t.Fatalf("admin action recorded as %d", got)
+	}
+}

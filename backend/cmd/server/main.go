@@ -114,7 +114,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("initialize verification service: %w", err)
 	}
-	scheduler, err := startActivityScheduler(activityService, logger)
+	scheduler, err := startActivityScheduler(activityService, registrationService, cfg.Activity.SchedulerInterval, logger)
 	if err != nil {
 		return err
 	}
@@ -172,23 +172,28 @@ func run() error {
 	return nil
 }
 
-// startActivityScheduler runs the periodic activity maintenance tasks. Later
-// stages add registration and ticket expiry to the same runner.
-func startActivityScheduler(activities *service.ActivityService, logger *zap.Logger) (*cron.Cron, error) {
+// startActivityScheduler runs the periodic activity maintenance tasks: the time
+// based activity status flow and pending registration expiry. Later stages add
+// ticket expiry to the same runner.
+func startActivityScheduler(activities *service.ActivityService, registrations *service.RegistrationService, interval time.Duration, logger *zap.Logger) (*cron.Cron, error) {
 	runner := cron.New()
-	if _, err := runner.AddFunc("@every 1m", func() {
+	if _, err := runner.AddFunc("@every "+interval.String(), func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		changed, err := activities.SyncStatuses(ctx)
 		if err != nil {
 			logger.Warn("activity status sync failed", zap.Error(err))
-			return
-		}
-		if changed > 0 {
+		} else if changed > 0 {
 			logger.Info("activity status synced", zap.Int64("changed", changed))
 		}
+		expired, err := registrations.ExpirePending(ctx)
+		if err != nil {
+			logger.Warn("registration expiry failed", zap.Error(err))
+		} else if expired > 0 {
+			logger.Info("registrations expired", zap.Int64("expired", expired))
+		}
 	}); err != nil {
-		return nil, fmt.Errorf("schedule activity status sync: %w", err)
+		return nil, fmt.Errorf("schedule activity maintenance: %w", err)
 	}
 	runner.Start()
 	return runner, nil
