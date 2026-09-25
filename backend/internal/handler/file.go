@@ -30,7 +30,7 @@ func (h *FileHandler) Upload(c *gin.Context) {
 		return
 	}
 	defer f.Close()
-	u, e := h.users.Current(c.Request.Context(), c.MustGet(middleware.UserUUIDKey).(string))
+	u, e := h.users.Current(c.Request.Context(), middleware.UserUUID(c))
 	if e != nil {
 		userError(c, e)
 		return
@@ -43,7 +43,7 @@ func (h *FileHandler) Upload(c *gin.Context) {
 	httpx.Success(c, gin.H{"id": file.UUID, "origin_name": file.OriginName, "mime_type": file.MIMEType, "file_size": file.FileSize, "access_url": url})
 }
 func (h *FileHandler) Get(c *gin.Context) {
-	u, e := h.users.Current(c.Request.Context(), c.MustGet(middleware.UserUUIDKey).(string))
+	u, e := h.users.Current(c.Request.Context(), middleware.UserUUID(c))
 	if e != nil {
 		userError(c, e)
 		return
@@ -56,7 +56,7 @@ func (h *FileHandler) Get(c *gin.Context) {
 	httpx.Success(c, gin.H{"id": f.UUID, "origin_name": f.OriginName, "mime_type": f.MIMEType, "file_size": f.FileSize, "access_url": url})
 }
 func (h *FileHandler) Delete(c *gin.Context) {
-	u, e := h.users.Current(c.Request.Context(), c.MustGet(middleware.UserUUIDKey).(string))
+	u, e := h.users.Current(c.Request.Context(), middleware.UserUUID(c))
 	if e == nil {
 		e = h.files.Delete(c.Request.Context(), u, c.Param("id"))
 	}

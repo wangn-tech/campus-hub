@@ -74,10 +74,18 @@ func TestAuthSetsUserUUID(t *testing.T) {
 	}
 }
 
+func TestUserUUIDIsEmptyWhenUnset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	if got := UserUUID(c); got != "" {
+		t.Fatalf("UserUUID without a value: got %q", got)
+	}
+}
+
 func newAuthRouter(auth Authenticator) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(Auth(auth))
-	r.GET("/me", func(c *gin.Context) { c.String(http.StatusOK, c.GetString(UserUUIDKey)) })
+	r.GET("/me", func(c *gin.Context) { c.String(http.StatusOK, UserUUID(c)) })
 	return r
 }

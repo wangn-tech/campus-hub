@@ -23,7 +23,7 @@ func NewUserHandler(s *service.UserService, files ...*service.FileService) *User
 	return h
 }
 func (h *UserHandler) Me(c *gin.Context) {
-	u, t, e := h.service.Me(c.Request.Context(), c.MustGet(middleware.UserUUIDKey).(string))
+	u, t, e := h.service.Me(c.Request.Context(), middleware.UserUUID(c))
 	if e != nil {
 		httpx.Error(c, http.StatusUnauthorized, 101401, "authentication required")
 		return
@@ -48,7 +48,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		bad(c)
 		return
 	}
-	u, e := h.service.Update(c.Request.Context(), c.MustGet(middleware.UserUUIDKey).(string), in)
+	u, e := h.service.Update(c.Request.Context(), middleware.UserUUID(c), in)
 	if e != nil {
 		userError(c, e)
 		return
@@ -83,7 +83,7 @@ func (h *UserHandler) Interests(c *gin.Context) {
 		bad(c)
 		return
 	}
-	e := h.service.ReplaceInterests(c.Request.Context(), c.MustGet(middleware.UserUUIDKey).(string), in.TagIDs)
+	e := h.service.ReplaceInterests(c.Request.Context(), middleware.UserUUID(c), in.TagIDs)
 	if e != nil {
 		userError(c, e)
 		return

@@ -9,6 +9,7 @@ import (
 	"github.com/wangn-tech/campus-hub/internal/httpx"
 )
 
+// UserUUIDKey is the gin context key holding the authenticated user's UUID.
 const UserUUIDKey = "user_uuid"
 
 // Authenticator resolves a raw access token to a user UUID. The concrete
@@ -16,6 +17,14 @@ const UserUUIDKey = "user_uuid"
 // middleware free of any dependency on that package.
 type Authenticator interface {
 	Authenticate(ctx context.Context, raw string) (string, error)
+}
+
+// UserUUID returns the authenticated user's UUID stored by Auth, or an empty
+// string when the context holds no value.
+func UserUUID(c *gin.Context) string {
+	value, _ := c.Get(UserUUIDKey)
+	uuid, _ := value.(string)
+	return uuid
 }
 
 // BearerToken extracts the raw token from the Authorization header.
@@ -27,6 +36,8 @@ func BearerToken(c *gin.Context) (string, bool) {
 	return parts[1], true
 }
 
+// Auth rejects requests without a valid bearer access token and stores the
+// authenticated user's UUID in the gin context for downstream handlers.
 func Auth(authenticator Authenticator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw, ok := BearerToken(c)

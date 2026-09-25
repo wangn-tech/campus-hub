@@ -88,7 +88,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		bad(c)
 		return
 	}
-	u := c.MustGet(middleware.UserUUIDKey).(string)
+	u := middleware.UserUUID(c)
 	user, e := h.user(c, u)
 	if e == nil {
 		e = h.service.ChangePassword(c.Request.Context(), user, in.OldPassword, in.NewPassword)
@@ -124,7 +124,7 @@ func (h *AuthHandler) Logoff(c *gin.Context) {
 		bad(c)
 		return
 	}
-	id := c.MustGet(middleware.UserUUIDKey).(string)
+	id := middleware.UserUUID(c)
 	u, e := h.user(c, id)
 	if e == nil {
 		e = h.service.Logoff(c.Request.Context(), u, in.Password, in.Code)
