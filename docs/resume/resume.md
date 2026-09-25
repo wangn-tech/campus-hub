@@ -25,4 +25,10 @@ CampusHub 校园活动与票据核销平台
 
 ## 性能与压测指标
 
-当前仓库未保存可复核的压测报告，因此简历中不填写未经验证的 QPS、P95/P99 或吞吐数据。完成压测后可补充以下真实指标：活动列表/搜索的 QPS 与 P95/P99、热点 Key 并发回源次数、Kafka 生产与消费延迟、WebSocket 单实例连接数及消息投递延迟、ES→MySQL 降级成功率。
+在单 Go 服务实例与本机 Docker 依赖（48 条活动数据、20 并发、30 秒）环境下完成核心读链路基线压测，所有请求均为 2xx、无传输错误：
+
+- 活动列表：803.8 RPS，P50/P95/P99 为 24ms / 31ms / 35ms。
+- Elasticsearch 活动搜索：1,137.6 RPS，P50/P95/P99 为 16ms / 26ms / 35ms。
+- Elasticsearch 停止后的 MySQL 降级搜索：1,657.2 RPS，P50/P95/P99 为 11ms / 16ms / 20ms；验证 `X-Search-Mode` 能从 `mysql-fallback` 恢复至 `elasticsearch`。
+
+上述数据是开发机基线，不作为生产容量承诺；后续将补充报名/核销写链路、Kafka 消费延迟和双实例 WebSocket 的隔离环境压测结果。完整命令、环境与结果见 `docs/test/results/2026-09-25-local-docker.md`。
