@@ -72,3 +72,5 @@ log:
   output: stdout
 observability:
   readiness_timeout: 3s
+activity:
+  scheduler_interval: 1m

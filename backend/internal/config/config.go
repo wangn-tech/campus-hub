@@ -17,6 +17,7 @@ type Config struct {
 	Kafka         KafkaConfig         `mapstructure:"kafka"`
 	Elasticsearch ElasticsearchConfig `mapstructure:"elasticsearch"`
 	Storage       StorageConfig       `mapstructure:"storage"`
+	Activity      ActivityConfig      `mapstructure:"activity"`
 	Mail          MailConfig          `mapstructure:"mail"`
 	Security      SecurityConfig      `mapstructure:"security"`
 	JWT           JWTConfig           `mapstructure:"jwt"`
@@ -76,6 +77,12 @@ type StorageConfig struct {
 	UseSSL       bool          `mapstructure:"use_ssl"`
 	PresignTTL   time.Duration `mapstructure:"presign_ttl"`
 	MaxImageSize int64         `mapstructure:"max_image_size"`
+}
+
+type ActivityConfig struct {
+	// SchedulerInterval drives the periodic activity maintenance tasks:
+	// activity status transitions, pending registration expiry.
+	SchedulerInterval time.Duration `mapstructure:"scheduler_interval"`
 }
 
 type MailConfig struct {
@@ -188,6 +195,7 @@ func Load(path string) (Config, error) {
 	v.SetDefault("storage.use_path_style", true)
 	v.SetDefault("storage.presign_ttl", "15m")
 	v.SetDefault("storage.max_image_size", 5242880)
+	v.SetDefault("activity.scheduler_interval", "1m")
 	v.SetDefault("mail.host", "127.0.0.1")
 	v.SetDefault("mail.port", 1025)
 	v.SetDefault("mail.from", "noreply@campushub.local")
@@ -264,6 +272,9 @@ func (c Config) Validate() error {
 	}
 	if c.Storage.Driver != "rustfs" || c.Storage.Endpoint == "" || c.Storage.AccessKey == "" || c.Storage.SecretKey == "" || c.Storage.Bucket == "" || c.Storage.PresignTTL <= 0 || c.Storage.MaxImageSize <= 0 {
 		return fmt.Errorf("valid rustfs storage configuration is required")
+	}
+	if c.Activity.SchedulerInterval <= 0 {
+		return fmt.Errorf("activity.scheduler_interval must be positive")
 	}
 	if c.Mail.Host == "" || c.Mail.Port < 1 || c.Mail.Port > 65535 || c.Mail.From == "" || (c.Mail.TLSMode != "none" && c.Mail.TLSMode != "starttls") {
 		return fmt.Errorf("mail configuration is invalid")

@@ -76,6 +76,54 @@ func (h *RegistrationHandler) Cancel(c *gin.Context) {
 	httpx.Success(c, gin.H{"id": c.Param("id"), "status": uint8(model.RegistrationCancelled)})
 }
 
+func (h *RegistrationHandler) Approve(c *gin.Context) {
+	actor, err := currentUser(c, h.users)
+	if err != nil {
+		userError(c, err)
+		return
+	}
+	if err := h.registrations.Approve(c.Request.Context(), actor, c.Param("id"), httpx.TraceID(c)); err != nil {
+		registrationError(c, err)
+		return
+	}
+	httpx.Success(c, gin.H{"id": c.Param("id"), "status": uint8(model.RegistrationApproved)})
+}
+
+func (h *RegistrationHandler) Reject(c *gin.Context) {
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if c.ShouldBindJSON(&in) != nil {
+		bad(c)
+		return
+	}
+	actor, err := currentUser(c, h.users)
+	if err != nil {
+		userError(c, err)
+		return
+	}
+	if err := h.registrations.Reject(c.Request.Context(), actor, c.Param("id"), in.Reason, httpx.TraceID(c)); err != nil {
+		registrationError(c, err)
+		return
+	}
+	httpx.Success(c, gin.H{"id": c.Param("id"), "status": uint8(model.RegistrationRejected)})
+}
+
+func (h *RegistrationHandler) ListByActivity(c *gin.Context) {
+	actor, err := currentUser(c, h.users)
+	if err != nil {
+		userError(c, err)
+		return
+	}
+	page, pageSize := service.NormalizePage(queryInt(c, "page", 0), queryInt(c, "page_size", 0))
+	items, total, err := h.registrations.ListByActivity(c.Request.Context(), actor, c.Param("id"), c.Query("status"), page, pageSize)
+	if err != nil {
+		registrationError(c, err)
+		return
+	}
+	httpx.Success(c, pageOf(items, page, pageSize, total))
+}
+
 func (h *RegistrationHandler) MyTickets(c *gin.Context) {
 	user, err := currentUser(c, h.users)
 	if err != nil {
@@ -119,6 +167,8 @@ func registrationError(c *gin.Context, e error) {
 		httpx.Error(c, http.StatusConflict, 103409, "registration requirements not met")
 	case errors.Is(e, service.ErrRegistrationConflict):
 		httpx.Error(c, http.StatusConflict, 103409, "registration conflict")
+	case errors.Is(e, service.ErrRegistrationInvalid):
+		httpx.Error(c, http.StatusBadRequest, 103400, "invalid registration request")
 	case errors.Is(e, service.ErrStorageUnavailable):
 		httpx.Error(c, http.StatusServiceUnavailable, 103503, "file storage unavailable")
 	default:

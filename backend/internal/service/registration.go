@@ -16,6 +16,7 @@ var (
 	ErrRegistrationNotFound    = errors.New("registration not found")
 	ErrRegistrationConflict    = errors.New("registration conflict")
 	ErrRegistrationNotEligible = errors.New("registration requirements not met")
+	ErrRegistrationInvalid     = errors.New("registration invalid input")
 	ErrTicketNotFound          = errors.New("ticket not found")
 )
 
@@ -209,13 +210,7 @@ func (s *RegistrationService) Cancel(ctx context.Context, user *model.User, regi
 		return err
 	}
 
-	if err := s.registrations.Transition(ctx, input); err != nil {
-		if errors.Is(err, repository.ErrConcurrentUpdate) {
-			return ErrRegistrationConflict
-		}
-		return err
-	}
-	return nil
+	return s.applyTransition(ctx, input)
 }
 
 // Detail returns one registration to the registrant, the activity organizer or

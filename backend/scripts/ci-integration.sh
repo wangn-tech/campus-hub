@@ -69,6 +69,28 @@ create_published_activity() {
   printf '%s' "${id}"
 }
 
+# register_user registers a fresh account via the email code flow and sets the
+# globals `email` and `access_token`. It must be called directly (not inside a
+# command substitution) so those assignments survive.
+register_user() {
+  local label="$1" code
+  email="integration-${label}-$(date +%s%N)@example.com"
+  # Clear the mailbox so the poll below cannot pick up an earlier code.
+  curl --silent --output /dev/null --request DELETE "http://127.0.0.1:18025/api/v1/messages" || true
+  curl --silent --show-error --output "${temporary_dir}/email-code.json" --request POST "http://127.0.0.1:${integration_port}/api/v1/email-codes" --header 'Content-Type: application/json' --data "{\"email\":\"${email}\",\"scene\":\"register\"}"
+  for _ in $(seq 1 30); do
+    curl --silent "http://127.0.0.1:18025/api/v1/messages" >"${temporary_dir}/mailpit.json" || true
+    code="$(grep -Eo '[0-9]{6}' "${temporary_dir}/mailpit.json" | tail -n 1 || true)"
+    [[ -n "${code}" ]] && break
+    sleep 1
+  done
+  [[ -n "${code}" ]]
+  curl --silent --show-error --output "${temporary_dir}/register.json" --request POST "http://127.0.0.1:${integration_port}/api/v1/auth/register" --header 'Content-Type: application/json' --data "{\"email\":\"${email}\",\"password\":\"integration-password\",\"nickname\":\"integration\",\"code\":\"${code}\"}"
+  curl --silent --show-error --output "${temporary_dir}/login.json" --request POST "http://127.0.0.1:${integration_port}/api/v1/auth/login" --header 'Content-Type: application/json' --data "{\"email\":\"${email}\",\"password\":\"integration-password\"}"
+  access_token="$(sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p' "${temporary_dir}/login.json")"
+  [[ -n "${access_token}" ]]
+}
+
 echo "Starting Compose dependencies"
 # Start the whole stack without waiting so image pulls and the slow
 # Elasticsearch boot overlap with the flows below. Only MySQL, Redis, RustFS and
@@ -80,28 +102,15 @@ echo "Applying migrations"
 go run ./cmd/migrate -direction up
 echo "Building and starting backend"
 go build -o "${temporary_dir}/campushub" ./cmd/server
-CAMPUSHUB_HTTP_PORT="${integration_port}" "${temporary_dir}/campushub" >"${temporary_dir}/server.log" 2>&1 &
+# Run the maintenance scheduler quickly so the tests can assert the time based
+# transitions instead of waiting a full minute.
+CAMPUSHUB_HTTP_PORT="${integration_port}" CAMPUSHUB_ACTIVITY_SCHEDULER_INTERVAL=5s "${temporary_dir}/campushub" >"${temporary_dir}/server.log" 2>&1 &
 server_pid=$!
 
 wait_for_status 200 /health
 
 echo "Verifying registration and login"
-email="integration-$(date +%s%N)@example.com"
-email_code_status="$(curl --silent --show-error --output "${temporary_dir}/email-code.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/email-codes" --header 'Content-Type: application/json' --data "{\"email\":\"${email}\",\"scene\":\"register\"}")"
-[[ "${email_code_status}" == "200" ]]
-for _ in $(seq 1 30); do
-  curl --silent "http://127.0.0.1:18025/api/v1/messages" >"${temporary_dir}/mailpit.json" || true
-  code="$(grep -Eo '[0-9]{6}' "${temporary_dir}/mailpit.json" | tail -n 1 || true)"
-  [[ -n "${code}" ]] && break
-  sleep 1
-done
-[[ -n "${code:-}" ]]
-register_status="$(curl --silent --show-error --output "${temporary_dir}/register.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/auth/register" --header 'Content-Type: application/json' --data "{\"email\":\"${email}\",\"password\":\"integration-password\",\"nickname\":\"integration\",\"code\":\"${code}\"}")"
-[[ "${register_status}" == "200" ]]
-login_status="$(curl --silent --show-error --output "${temporary_dir}/login.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/auth/login" --header 'Content-Type: application/json' --data "{\"email\":\"${email}\",\"password\":\"integration-password\"}")"
-[[ "${login_status}" == "200" ]]
-grep -q 'access_token' "${temporary_dir}/login.json"
-access_token="$(sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p' "${temporary_dir}/login.json")"
+register_user primary
 [[ -n "${access_token}" ]]
 
 echo "Verifying private RustFS upload and recovery"
@@ -171,6 +180,56 @@ registration_log_count="$("${compose[@]}" exec -T mysql mysql --user="${mysql_us
 [[ "${registration_log_count}" -ge 1 ]]
 registration_event_count="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM outbox_events WHERE event_type IN ('registration.created','ticket.created','registration.cancelled','ticket.voided')" 2>/dev/null | tr -d '[:space:]')"
 [[ "${registration_event_count}" -ge 4 ]]
+
+echo "Verifying registration approval"
+approval_activity="$(create_published_activity true "integration approval activity")"
+pending_status="$(curl --silent --show-error --output "${temporary_dir}/registration-pending.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${approval_activity}/registrations" --header "Authorization: Bearer ${access_token}")"
+[[ "${pending_status}" == "200" ]]
+pending_registration="$(sed -n 's/.*"data":{"id":"\([^"]*\)".*/\1/p' "${temporary_dir}/registration-pending.json")"
+[[ -n "${pending_registration}" ]]
+grep -q '"status":0' "${temporary_dir}/registration-pending.json"
+if grep -q '"ticket"' "${temporary_dir}/registration-pending.json"; then
+  echo "a pending registration must not carry a ticket" >&2
+  exit 1
+fi
+# register_user overwrites access_token, so keep the organizer token around and
+# restore it after creating the second account.
+primary_token="${access_token}"
+register_user other
+other_token="${access_token}"
+access_token="${primary_token}"
+[[ -n "${other_token}" ]]
+foreign_status="$(curl --silent --show-error --output "${temporary_dir}/registration-foreign.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/registrations/${pending_registration}/approve" --header "Authorization: Bearer ${other_token}")"
+[[ "${foreign_status}" == "403" ]]
+approve_status="$(curl --silent --show-error --output "${temporary_dir}/registration-approved.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/registrations/${pending_registration}/approve" --header "Authorization: Bearer ${access_token}")"
+[[ "${approve_status}" == "200" ]]
+approved_detail="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/registrations/${pending_registration}" --header "Authorization: Bearer ${access_token}")"
+grep -q '"status":1' <<<"${approved_detail}"
+grep -q '"ticket"' <<<"${approved_detail}"
+activity_registrations="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/activities/${approval_activity}/registrations?status=approved&page=1&page_size=50" --header "Authorization: Bearer ${access_token}")"
+grep -q "${pending_registration}" <<<"${activity_registrations}"
+grep -q '"nickname":"integration"' <<<"${activity_registrations}"
+
+echo "Verifying approval timeout"
+expiry_activity="$(create_published_activity true "integration expiry activity")"
+expiry_register_status="$(curl --silent --show-error --output "${temporary_dir}/registration-expiry.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${expiry_activity}/registrations" --header "Authorization: Bearer ${access_token}")"
+[[ "${expiry_register_status}" == "200" ]]
+expiry_registration="$(sed -n 's/.*"data":{"id":"\([^"]*\)".*/\1/p' "${temporary_dir}/registration-expiry.json")"
+[[ -n "${expiry_registration}" ]]
+"${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" -e "UPDATE activity_registrations SET expires_at = UTC_TIMESTAMP(3) - INTERVAL 1 MINUTE WHERE uuid = '${expiry_registration}'" >/dev/null 2>&1
+expired_detail=""
+for _ in $(seq 1 20); do
+  expired_detail="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/registrations/${expiry_registration}" --header "Authorization: Bearer ${access_token}")"
+  if grep -q '"status":5' <<<"${expired_detail}"; then
+    break
+  fi
+  sleep 1
+done
+grep -q '"status":5' <<<"${expired_detail}"
+pending_slots="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT pending_participant_count FROM activities WHERE uuid = '${expiry_activity}'" 2>/dev/null | tr -d '[:space:]')"
+[[ "${pending_slots}" == "0" ]]
+expired_events="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM outbox_events WHERE event_type = 'registration.expired'" 2>/dev/null | tr -d '[:space:]')"
+[[ "${expired_events}" -ge 1 ]]
 
 echo "Waiting for Kafka and Elasticsearch readiness"
 "${compose[@]}" up --detach --wait --wait-timeout 180 kafka elasticsearch

@@ -70,10 +70,13 @@ type TransitionInput struct {
 	Values         map[string]any
 	PendingDelta   int
 	ApprovedDelta  int
-	Ticket         *model.Ticket // issued when the transition approves the registration
-	TicketID       *uint64       // voided when the transition releases a ticket
-	Log            *model.RegistrationStatusLog
-	Events         []*model.OutboxEvent
+	// GuardCapacity only applies when the transition reserves a new slot; an
+	// approval moves an already reserved slot and must not re-check capacity.
+	GuardCapacity bool
+	Ticket        *model.Ticket // issued when the transition approves the registration
+	TicketID      *uint64       // voided when the transition releases a ticket
+	Log           *model.RegistrationStatusLog
+	Events        []*model.OutboxEvent
 }
 
 func (r *RegistrationRepository) Transition(ctx context.Context, in TransitionInput) error {
@@ -87,11 +90,11 @@ func (r *RegistrationRepository) Transition(ctx context.Context, in TransitionIn
 		if result.RowsAffected == 0 {
 			return ErrConcurrentUpdate
 		}
-		guard := in.PendingDelta > 0 || in.ApprovedDelta > 0
-		if err := adjustParticipantCounters(tx, in.ActivityID, in.PendingDelta, in.ApprovedDelta, guard); err != nil {
+		if err := adjustParticipantCounters(tx, in.ActivityID, in.PendingDelta, in.ApprovedDelta, in.GuardCapacity); err != nil {
 			return err
 		}
 		if in.Ticket != nil {
+			in.Ticket.RegistrationID = in.RegistrationID
 			if err := tx.Create(in.Ticket).Error; err != nil {
 				return err
 			}
@@ -187,6 +190,43 @@ func (r *RegistrationRepository) ListByUser(ctx context.Context, filter UserRegi
 		return nil, 0, err
 	}
 	return registrations, total, nil
+}
+
+// ListByActivity returns the registrations of one activity for its organizer.
+func (r *RegistrationRepository) ListByActivity(ctx context.Context, activityID uint64, statuses []int, page, pageSize int) ([]model.Registration, int64, error) {
+	base := func() *gorm.DB {
+		query := r.db.WithContext(ctx).Model(&model.Registration{}).Where("activity_id = ?", activityID)
+		if len(statuses) > 0 {
+			query = query.Where("status IN ?", statuses)
+		}
+		return query
+	}
+	var total int64
+	if err := base().Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var registrations []model.Registration
+	err := base().
+		Order("created_at DESC, id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&registrations).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return registrations, total, nil
+}
+
+// ListExpiredPending returns the pending registrations whose approval window has
+// passed, oldest first.
+func (r *RegistrationRepository) ListExpiredPending(ctx context.Context, now time.Time, limit int) ([]model.Registration, error) {
+	var registrations []model.Registration
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND active_flag = 1 AND expires_at IS NOT NULL AND expires_at <= ?", uint8(model.RegistrationPending), now).
+		Order("expires_at").
+		Limit(limit).
+		Find(&registrations).Error
+	return registrations, err
 }
 
 // adjustParticipantCounters moves the pending/approved participant counters of
