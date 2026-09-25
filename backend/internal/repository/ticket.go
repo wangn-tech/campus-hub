@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"time"
 
 	"github.com/wangn-tech/campus-hub/internal/model"
 	"gorm.io/gorm"
@@ -26,6 +27,23 @@ func (r *TicketRepository) FindByUUID(ctx context.Context, uuid string) (*model.
 		return nil, err
 	}
 	return &ticket, nil
+}
+
+func (r *TicketRepository) FindByCode(ctx context.Context, code string) (*model.Ticket, error) {
+	var ticket model.Ticket
+	if err := r.db.WithContext(ctx).Where("code = ?", code).First(&ticket).Error; err != nil {
+		return nil, err
+	}
+	return &ticket, nil
+}
+
+func (r *TicketRepository) FindByIDs(ctx context.Context, ids []uint64) ([]model.Ticket, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var tickets []model.Ticket
+	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&tickets).Error
+	return tickets, err
 }
 
 func (r *TicketRepository) FindByRegistrationIDs(ctx context.Context, ids []uint64) ([]model.Ticket, error) {
@@ -63,6 +81,38 @@ func (r *TicketRepository) ListByUser(ctx context.Context, userID uint64, page, 
 		return nil, 0, err
 	}
 	return tickets, total, nil
+}
+
+// ListExpiredUnused returns unused tickets whose validity window has closed.
+func (r *TicketRepository) ListExpiredUnused(ctx context.Context, now time.Time, limit int) ([]model.Ticket, error) {
+	var tickets []model.Ticket
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND valid_end_at IS NOT NULL AND valid_end_at <= ?", uint8(model.TicketUnused), now).
+		Order("valid_end_at").
+		Limit(limit).
+		Find(&tickets).Error
+	return tickets, err
+}
+
+// Expire marks an unused ticket expired and records the events atomically.
+func (r *TicketRepository) Expire(ctx context.Context, ticketID uint64, events []*model.OutboxEvent) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		result := tx.Model(&model.Ticket{}).
+			Where("id = ? AND status = ?", ticketID, uint8(model.TicketUnused)).
+			Updates(map[string]any{
+				"status":     uint8(model.TicketExpired),
+				"updated_at": now,
+				"version":    gorm.Expr("version + 1"),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrConcurrentUpdate
+		}
+		return enqueueOutboxEvents(tx, events)
+	})
 }
 
 // NextCode returns an unused ticket code. The unique index on tickets.code is

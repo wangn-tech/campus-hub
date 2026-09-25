@@ -360,10 +360,16 @@ func (s *RegistrationService) checkEligibility(ctx context.Context, user *model.
 
 // canManage reports whether the user owns the activity or is an administrator.
 func (s *RegistrationService) canManage(ctx context.Context, activity *model.Activity, user *model.User) (bool, error) {
+	return canManageActivity(ctx, s.users, activity, user)
+}
+
+// canManageActivity reports whether the user owns the activity or is an
+// administrator.
+func canManageActivity(ctx context.Context, users *repository.UserRepository, activity *model.Activity, user *model.User) (bool, error) {
 	if activity.OrganizerID == user.ID {
 		return true, nil
 	}
-	return s.users.HasRole(ctx, user.ID, model.RoleAdmin)
+	return users.HasRole(ctx, user.ID, model.RoleAdmin)
 }
 
 // approvalDeadline caps the approval window so a pending registration never

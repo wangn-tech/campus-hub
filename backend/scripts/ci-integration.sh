@@ -4,6 +4,8 @@ set -Eeuo pipefail
 compose=(docker compose -f deploy/docker/docker-compose.yml --env-file .env.example)
 temporary_dir="$(mktemp -d)"
 server_pid=""
+# Unique per run so search assertions cannot pick up rows left by earlier runs.
+run_id="$(date +%s)"
 mysql_user="${CAMPUSHUB_MYSQL_USERNAME:-campushub}"
 mysql_password="${CAMPUSHUB_MYSQL_PASSWORD:-change-me}"
 mysql_database="${CAMPUSHUB_MYSQL_DATABASE:-campushub}"
@@ -58,9 +60,12 @@ wait_for_status() {
 # create_published_activity creates an activity whose registration window is
 # open and approves it, so it can be registered for. Prints the activity id.
 create_published_activity() {
-  local require_approval="$1" title="$2" payload id
+  local require_approval="$1" title="$2" start_offset_min="${3:-120}" payload id start_ms
+  # The activity starts start_offset_min from now, the registration window closes
+  # halfway there and the ticket window opens an hour before the start.
+  start_ms="$(( now_ms + start_offset_min * 60000 ))"
   payload="$(printf '{"title":"%s","description":"created by ci","category_id":"%s","contact_phone":"13800000000","register_start_at":%s,"register_end_at":%s,"activity_start_at":%s,"activity_end_at":%s,"location":"CI Hall","address_detail":"integration","max_participants":30,"require_approval":%s,"require_student_verify":false,"min_credit_score":0,"tag_ids":["%s"],"is_draft":false}' \
-    "${title}" "${category_id}" "$(( now_ms - hour_ms ))" "$(( now_ms + hour_ms ))" "$(( now_ms + 2 * hour_ms ))" "$(( now_ms + 3 * hour_ms ))" "${require_approval}" "${tag_id}")"
+    "${title}" "${category_id}" "$(( now_ms - hour_ms ))" "$(( now_ms + start_offset_min * 30000 ))" "${start_ms}" "$(( start_ms + hour_ms ))" "${require_approval}" "${tag_id}")"
   curl --silent --show-error --output "${temporary_dir}/helper-activity.json" --request POST "http://127.0.0.1:${integration_port}/api/v1/activities" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "${payload}"
   id="$(sed -n 's/.*"data":{"id":"\([^"]*\)".*/\1/p' "${temporary_dir}/helper-activity.json")"
   [[ -n "${id}" ]]
@@ -133,8 +138,8 @@ tag_id="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v
 [[ -n "${tag_id}" ]]
 now_ms="$(( $(date +%s) * 1000 ))"
 hour_ms=3600000
-payload="$(printf '{"title":"integration activity","description":"created by ci","category_id":"%s","contact_phone":"13800000000","register_start_at":%s,"register_end_at":%s,"activity_start_at":%s,"activity_end_at":%s,"location":"CI Hall","address_detail":"integration","max_participants":30,"require_approval":false,"require_student_verify":false,"min_credit_score":0,"tag_ids":["%s"],"is_draft":true}' \
-  "${category_id}" "$(( now_ms + hour_ms ))" "$(( now_ms + 2 * hour_ms ))" "$(( now_ms + 3 * hour_ms ))" "$(( now_ms + 4 * hour_ms ))" "${tag_id}")"
+payload="$(printf '{"title":"integration activity %s","description":"created by ci","category_id":"%s","contact_phone":"13800000000","register_start_at":%s,"register_end_at":%s,"activity_start_at":%s,"activity_end_at":%s,"location":"CI Hall","address_detail":"integration","max_participants":30,"require_approval":false,"require_student_verify":false,"min_credit_score":0,"tag_ids":["%s"],"is_draft":true}' \
+  "${run_id}" "${category_id}" "$(( now_ms + hour_ms ))" "$(( now_ms + 2 * hour_ms ))" "$(( now_ms + 3 * hour_ms ))" "$(( now_ms + 4 * hour_ms ))" "${tag_id}")"
 create_status="$(curl --silent --show-error --output "${temporary_dir}/activity-created.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "${payload}")"
 [[ "${create_status}" == "200" ]]
 activity_id="$(grep -o '"id":"[^"]*"' "${temporary_dir}/activity-created.json" | head -n 1 | cut -d'"' -f4)"
@@ -148,7 +153,7 @@ approve_status="$(curl --silent --show-error --output "${temporary_dir}/activity
 [[ "${approve_status}" == "200" ]]
 list_body="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/activities?page=1&page_size=50")"
 grep -q "${activity_id}" <<<"${list_body}"
-search_body="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/activities/search?keyword=integration")"
+search_body="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/activities/search?keyword=${run_id}")"
 grep -q "${activity_id}" <<<"${search_body}"
 detail_status="$(curl --silent --show-error --output "${temporary_dir}/activity-detail.json" --write-out '%{http_code}' "http://127.0.0.1:${integration_port}/api/v1/activities/${activity_id}")"
 [[ "${detail_status}" == "200" ]]
@@ -230,6 +235,53 @@ pending_slots="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --pa
 [[ "${pending_slots}" == "0" ]]
 expired_events="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM outbox_events WHERE event_type = 'registration.expired'" 2>/dev/null | tr -d '[:space:]')"
 [[ "${expired_events}" -ge 1 ]]
+
+echo "Verifying ticket check-in"
+checkin_activity="$(create_published_activity true "integration check-in activity" 30)"
+checkin_register_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-registration.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${checkin_activity}/registrations" --header "Authorization: Bearer ${access_token}")"
+[[ "${checkin_register_status}" == "200" ]]
+checkin_registration="$(sed -n 's/.*"data":{"id":"\([^"]*\)".*/\1/p' "${temporary_dir}/checkin-registration.json")"
+[[ -n "${checkin_registration}" ]]
+approve_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-approved.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/registrations/${checkin_registration}/approve" --header "Authorization: Bearer ${access_token}")"
+[[ "${approve_checkin_status}" == "200" ]]
+checkin_detail="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/registrations/${checkin_registration}" --header "Authorization: Bearer ${access_token}")"
+checkin_ticket="$(sed -n 's/.*"ticket":{"id":"\([^"]*\)".*/\1/p' <<<"${checkin_detail}")"
+checkin_code="$(sed -n 's/.*"ticket":{"id":"[^"]*","code":"\([^"]*\)".*/\1/p' <<<"${checkin_detail}")"
+[[ -n "${checkin_ticket}" && -n "${checkin_code}" ]]
+invalid_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-invalid.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data '{"client_request_id":"ci-invalid"}')"
+[[ "${invalid_checkin_status}" == "400" ]]
+first_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "{\"code\":\"${checkin_code}\",\"client_request_id\":\"ci-checkin-1\"}")"
+[[ "${first_checkin_status}" == "200" ]]
+replay_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-replay.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "{\"code\":\"${checkin_code}\",\"client_request_id\":\"ci-checkin-1\"}")"
+[[ "${replay_checkin_status}" == "200" ]]
+duplicate_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-duplicate.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "{\"ticket_id\":\"${checkin_ticket}\",\"client_request_id\":\"ci-checkin-2\"}")"
+[[ "${duplicate_checkin_status}" == "409" ]]
+foreign_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-foreign.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${other_token}" --header 'Content-Type: application/json' --data "{\"ticket_id\":\"${checkin_ticket}\",\"client_request_id\":\"ci-checkin-3\"}")"
+[[ "${foreign_checkin_status}" == "403" ]]
+used_ticket_detail="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/tickets/${checkin_ticket}" --header "Authorization: Bearer ${access_token}")"
+grep -q '"status":1' <<<"${used_ticket_detail}"
+checkin_records="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/check-ins?activity_id=${checkin_activity}&page=1&page_size=50" --header "Authorization: Bearer ${access_token}")"
+grep -q "${checkin_ticket}" <<<"${checkin_records}"
+
+echo "Verifying ticket expiry"
+expiry_ticket_activity="$(create_published_activity false "integration ticket expiry activity" 30)"
+expiry_ticket_status="$(curl --silent --show-error --output "${temporary_dir}/ticket-expiry.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${expiry_ticket_activity}/registrations" --header "Authorization: Bearer ${access_token}")"
+[[ "${expiry_ticket_status}" == "200" ]]
+expiry_ticket="$(sed -n 's/.*"ticket":{"id":"\([^"]*\)".*/\1/p' "${temporary_dir}/ticket-expiry.json")"
+[[ -n "${expiry_ticket}" ]]
+"${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" -e "UPDATE tickets SET valid_end_at = UTC_TIMESTAMP(3) - INTERVAL 1 MINUTE WHERE uuid = '${expiry_ticket}'" >/dev/null 2>&1
+expired_ticket_detail=""
+expired_ticket_status=""
+for _ in $(seq 1 20); do
+  expired_ticket_detail="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/tickets/${expiry_ticket}" --header "Authorization: Bearer ${access_token}")"
+  # Read the ticket's own status; the embedded activity also has a status field.
+  expired_ticket_status="$(sed -n 's/.*"data":{"id":"[^"]*","code":"[^"]*","status":\([0-9]*\).*/\1/p' <<<"${expired_ticket_detail}")"
+  [[ "${expired_ticket_status}" == "2" ]] && break
+  sleep 1
+done
+[[ "${expired_ticket_status}" == "2" ]]
+ticket_expired_events="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM outbox_events WHERE event_type = 'ticket.expired'" 2>/dev/null | tr -d '[:space:]')"
+[[ "${ticket_expired_events}" -ge 1 ]]
 
 echo "Waiting for Kafka and Elasticsearch readiness"
 "${compose[@]}" up --detach --wait --wait-timeout 180 kafka elasticsearch
