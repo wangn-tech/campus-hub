@@ -6,7 +6,7 @@ COMPOSE_FILE := deploy/docker/docker-compose.yml
 .PHONY: dev-up dev-down dev-logs run test vet fmt lint migrate-up migrate-down openapi compose-config integration
 
 dev-up:
-	docker compose -f $(COMPOSE_FILE) --env-file .env.example up -d mysql redis kafka elasticsearch minio minio-init mailpit
+	docker compose -f $(COMPOSE_FILE) --env-file .env.example up -d mysql redis kafka elasticsearch minio mailpit
 
 dev-down:
 	docker compose -f $(COMPOSE_FILE) --env-file .env.example down

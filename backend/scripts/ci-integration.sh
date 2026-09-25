@@ -54,7 +54,6 @@ wait_for_status() {
 
 echo "Starting Compose dependencies"
 "${compose[@]}" up --detach --wait --wait-timeout 180 mysql redis kafka elasticsearch minio mailpit
-"${compose[@]}" run --rm minio-init
 echo "Applying migrations"
 go run ./cmd/migrate -direction up
 echo "Building and starting backend"

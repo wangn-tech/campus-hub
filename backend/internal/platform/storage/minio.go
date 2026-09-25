@@ -25,6 +25,9 @@ func Open(cfg config.StorageConfig) (*Client, error) {
 	return &Client{client: c, bucket: cfg.Bucket, presignTTL: cfg.PresignTTL}, nil
 }
 func (c *Client) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) (minio.UploadInfo, error) {
+	if err := c.ensureBucket(ctx); err != nil {
+		return minio.UploadInfo{}, err
+	}
 	return c.client.PutObject(ctx, c.bucket, key, r, size, minio.PutObjectOptions{ContentType: contentType})
 }
 func (c *Client) Remove(ctx context.Context, key string) error {
@@ -40,4 +43,21 @@ func (c *Client) SignedURL(ctx context.Context, key string) (string, error) {
 func (c *Client) Check(ctx context.Context) error {
 	_, err := c.client.BucketExists(ctx, c.bucket)
 	return err
+}
+
+func (c *Client) ensureBucket(ctx context.Context) error {
+	exists, err := c.client.BucketExists(ctx, c.bucket)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	if err = c.client.MakeBucket(ctx, c.bucket, minio.MakeBucketOptions{}); err != nil {
+		exists, checkErr := c.client.BucketExists(ctx, c.bucket)
+		if checkErr != nil || !exists {
+			return err
+		}
+	}
+	return nil
 }
