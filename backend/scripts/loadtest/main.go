@@ -98,7 +98,9 @@ func resolveScenario(scenario, path, method, body string) (string, string, strin
 	case "activity-list":
 		return "/api/v1/activities?page=1&page_size=10&sort=start_time", http.MethodGet, ""
 	case "activity-search":
-		return "/api/v1/activities/search?keyword=campus&page=1&page_size=10&sort=hot", http.MethodGet, ""
+		// Omit a keyword so the fixed seed set has hits and this scenario uses
+		// Elasticsearch instead of the empty-result fallback.
+		return "/api/v1/activities/search?page=1&page_size=10&sort=hot", http.MethodGet, ""
 	case "custom":
 		return path, strings.ToUpper(method), body
 	default:
