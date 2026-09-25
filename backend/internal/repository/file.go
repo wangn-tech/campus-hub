@@ -26,6 +26,14 @@ func (r *FileRepository) FindByID(ctx context.Context, id uint64) (*model.File, 
 	}
 	return &f, nil
 }
+func (r *FileRepository) FindByIDs(ctx context.Context, ids []uint64) ([]model.File, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var files []model.File
+	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&files).Error
+	return files, err
+}
 func (r *FileRepository) SoftDelete(ctx context.Context, id uint64) error {
 	return r.db.WithContext(ctx).Delete(&model.File{}, id).Error
 }

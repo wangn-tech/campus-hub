@@ -67,14 +67,6 @@ func (h *UserHandler) Update(c *gin.Context) {
 	}
 	httpx.Success(c, data)
 }
-func (h *UserHandler) Tags(c *gin.Context) {
-	tags, e := h.service.Tags(c.Request.Context())
-	if e != nil {
-		httpx.Error(c, http.StatusInternalServerError, 100500, "list tags failed")
-		return
-	}
-	httpx.Success(c, gin.H{"items": tags})
-}
 func (h *UserHandler) Interests(c *gin.Context) {
 	var in struct {
 		TagIDs []string `json:"tag_ids"`

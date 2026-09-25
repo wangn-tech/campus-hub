@@ -4,6 +4,9 @@ set -Eeuo pipefail
 compose=(docker compose -f deploy/docker/docker-compose.yml --env-file .env.example)
 temporary_dir="$(mktemp -d)"
 server_pid=""
+mysql_user="${CAMPUSHUB_MYSQL_USERNAME:-campushub}"
+mysql_password="${CAMPUSHUB_MYSQL_PASSWORD:-change-me}"
+mysql_database="${CAMPUSHUB_MYSQL_DATABASE:-campushub}"
 integration_port="${CAMPUSHUB_INTEGRATION_PORT:-}"
 if [[ -z "${integration_port}" ]]; then
   for candidate_port in $(seq 18081 18120); do
@@ -95,6 +98,38 @@ upload_down_status="$(curl --silent --show-error --output "${temporary_dir}/uplo
 "${compose[@]}" up --detach --wait --wait-timeout 60 rustfs
 upload_recovered_status="$(curl --silent --show-error --output "${temporary_dir}/upload-recovered.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/files/images" --header "Authorization: Bearer ${access_token}" --form "file=@${temporary_dir}/image.png;type=image/png" --form 'biz_type=avatar')"
 [[ "${upload_recovered_status}" == "200" ]]
+
+echo "Verifying activity lifecycle"
+category_id="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/categories" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
+[[ -n "${category_id}" ]]
+tag_id="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/tags?type=activity" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
+[[ -n "${tag_id}" ]]
+now_ms="$(( $(date +%s) * 1000 ))"
+hour_ms=3600000
+payload="$(printf '{"title":"integration activity","description":"created by ci","category_id":"%s","contact_phone":"13800000000","register_start_at":%s,"register_end_at":%s,"activity_start_at":%s,"activity_end_at":%s,"location":"CI Hall","address_detail":"integration","max_participants":30,"require_approval":false,"require_student_verify":false,"min_credit_score":0,"tag_ids":["%s"],"is_draft":true}' \
+  "${category_id}" "$(( now_ms + hour_ms ))" "$(( now_ms + 2 * hour_ms ))" "$(( now_ms + 3 * hour_ms ))" "$(( now_ms + 4 * hour_ms ))" "${tag_id}")"
+create_status="$(curl --silent --show-error --output "${temporary_dir}/activity-created.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "${payload}")"
+[[ "${create_status}" == "200" ]]
+activity_id="$(grep -o '"id":"[^"]*"' "${temporary_dir}/activity-created.json" | head -n 1 | cut -d'"' -f4)"
+[[ -n "${activity_id}" ]]
+submit_status="$(curl --silent --show-error --output "${temporary_dir}/activity-submit.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${activity_id}/submit" --header "Authorization: Bearer ${access_token}")"
+[[ "${submit_status}" == "200" ]]
+denied_status="$(curl --silent --show-error --output "${temporary_dir}/activity-denied.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${activity_id}/approve" --header "Authorization: Bearer ${access_token}")"
+[[ "${denied_status}" == "403" ]]
+"${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" -e "INSERT IGNORE INTO user_roles (user_id, role_id, created_at) SELECT u.id, r.id, UTC_TIMESTAMP(3) FROM users u JOIN roles r ON r.code = 'admin' WHERE u.email = '${email}'" >/dev/null 2>&1
+approve_status="$(curl --silent --show-error --output "${temporary_dir}/activity-approved.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${activity_id}/approve" --header "Authorization: Bearer ${access_token}")"
+[[ "${approve_status}" == "200" ]]
+list_body="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/activities?page=1&page_size=50")"
+grep -q "${activity_id}" <<<"${list_body}"
+search_body="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/activities/search?keyword=integration")"
+grep -q "${activity_id}" <<<"${search_body}"
+detail_status="$(curl --silent --show-error --output "${temporary_dir}/activity-detail.json" --write-out '%{http_code}' "http://127.0.0.1:${integration_port}/api/v1/activities/${activity_id}")"
+[[ "${detail_status}" == "200" ]]
+grep -q 'integration activity' "${temporary_dir}/activity-detail.json"
+cancel_status="$(curl --silent --show-error --output "${temporary_dir}/activity-cancelled.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${activity_id}/cancel" --header "Authorization: Bearer ${access_token}")"
+[[ "${cancel_status}" == "200" ]]
+status_log_count="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM activity_status_logs WHERE activity_id = (SELECT id FROM activities WHERE uuid = '${activity_id}')" 2>/dev/null | tr -d '[:space:]')"
+[[ "${status_log_count}" -ge 3 ]]
 
 echo "Verifying Redis readiness recovery"
 "${compose[@]}" stop redis

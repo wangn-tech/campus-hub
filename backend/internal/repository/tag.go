@@ -10,8 +10,31 @@ type TagRepository struct{ db *gorm.DB }
 
 func NewTagRepository(db *gorm.DB) *TagRepository { return &TagRepository{db: db} }
 func (r *TagRepository) ListInterest(ctx context.Context) ([]model.Tag, error) {
+	return r.ListByScope(ctx, "interest")
+}
+
+// ListByScope returns enabled tags attached to the given scope. Supported
+// scopes are "activity" and "interest".
+func (r *TagRepository) ListByScope(ctx context.Context, scope string) ([]model.Tag, error) {
 	var tags []model.Tag
-	err := r.db.WithContext(ctx).Table("tags").Select("tags.*").Joins("JOIN tag_scopes ON tag_scopes.tag_id = tags.id").Where("tag_scopes.scope = ? AND tag_scopes.status = ? AND tags.status = ?", "interest", 1, 1).Order("tags.name").Find(&tags).Error
+	err := r.db.WithContext(ctx).Table("tags").Select("tags.*").
+		Joins("JOIN tag_scopes ON tag_scopes.tag_id = tags.id").
+		Where("tag_scopes.scope = ? AND tag_scopes.status = 1 AND tags.status = 1", scope).
+		Order("tag_scopes.usage_count DESC, tags.name").
+		Find(&tags).Error
+	return tags, err
+}
+
+// FindByUUIDsForScope resolves enabled tag UUIDs that belong to a scope.
+func (r *TagRepository) FindByUUIDsForScope(ctx context.Context, uuids []string, scope string) ([]model.Tag, error) {
+	if len(uuids) == 0 {
+		return nil, nil
+	}
+	var tags []model.Tag
+	err := r.db.WithContext(ctx).Table("tags").Select("tags.*").
+		Joins("JOIN tag_scopes ON tag_scopes.tag_id = tags.id").
+		Where("tags.uuid IN ? AND tags.status = 1 AND tag_scopes.scope = ? AND tag_scopes.status = 1", uuids, scope).
+		Find(&tags).Error
 	return tags, err
 }
 func (r *TagRepository) ReplaceInterests(ctx context.Context, userID uint64, uuids []string) error {

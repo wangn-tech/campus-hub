@@ -87,7 +87,6 @@ func (s *UserService) Update(ctx context.Context, id string, in ProfileInput) (*
 	}
 	return s.users.FindByUUID(ctx, id)
 }
-func (s *UserService) Tags(ctx context.Context) ([]model.Tag, error) { return s.tags.ListInterest(ctx) }
 func (s *UserService) ReplaceInterests(ctx context.Context, id string, ids []string) error {
 	u, e := s.users.FindByUUID(ctx, id)
 	if e != nil {

@@ -2,32 +2,37 @@ package model
 
 type ActivityStatus uint8
 
+// Activity status values follow the database design document (§16.2).
 const (
 	ActivityDraft ActivityStatus = iota
 	ActivityPendingReview
-	ActivityRejected
 	ActivityPublished
-	ActivityCancelled
+	ActivityOngoing
 	ActivityFinished
+	ActivityRejected
+	ActivityCancelled
 )
 
 type RegistrationStatus uint8
 
+// Registration status values follow the database design document (§16.3).
 const (
 	RegistrationPending RegistrationStatus = iota
 	RegistrationApproved
 	RegistrationRejected
 	RegistrationCancelled
+	RegistrationFailed
 	RegistrationExpired
 )
 
 type TicketStatus uint8
 
+// Ticket status values follow the database design document (§16.4).
 const (
-	TicketValid TicketStatus = iota
+	TicketUnused TicketStatus = iota
 	TicketUsed
-	TicketVoided
 	TicketExpired
+	TicketVoided
 )
 
 type StudentVerificationStatus uint8

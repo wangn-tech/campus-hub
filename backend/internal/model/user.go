@@ -2,6 +2,9 @@ package model
 
 import "time"
 
+// RoleAdmin is the role code for platform administrators.
+const RoleAdmin = "admin"
+
 type User struct {
 	ID           uint64     `gorm:"primaryKey"`
 	UUID         string     `gorm:"type:char(36);uniqueIndex;not null"`
@@ -34,11 +37,13 @@ type Role struct {
 func (Role) TableName() string { return "roles" }
 
 type Tag struct {
-	ID     uint64 `gorm:"primaryKey"`
-	UUID   string `gorm:"type:char(36);uniqueIndex;not null"`
-	Name   string `gorm:"size:50;not null"`
-	Slug   string `gorm:"size:80;not null"`
-	Status uint8
+	ID     uint64 `gorm:"primaryKey" json:"-"`
+	UUID   string `gorm:"type:char(36);uniqueIndex;not null" json:"id"`
+	Name   string `gorm:"size:50;not null" json:"name"`
+	Slug   string `gorm:"size:80;not null" json:"slug"`
+	Color  string `gorm:"size:20;not null;default:''" json:"color"`
+	Icon   string `gorm:"size:255;not null;default:''" json:"icon"`
+	Status uint8  `gorm:"not null;default:1" json:"status"`
 }
 
 func (Tag) TableName() string { return "tags" }

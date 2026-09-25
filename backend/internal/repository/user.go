@@ -32,6 +32,25 @@ func (r *UserRepository) FindByUUID(ctx context.Context, uuid string) (*model.Us
 	return &user, nil
 }
 
+func (r *UserRepository) FindByIDs(ctx context.Context, ids []uint64) ([]model.User, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var users []model.User
+	err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&users).Error
+	return users, err
+}
+
+// HasRole reports whether the user holds the given role code.
+func (r *UserRepository) HasRole(ctx context.Context, userID uint64, code string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("user_roles").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("user_roles.user_id = ? AND roles.code = ?", userID, code).
+		Count(&count).Error
+	return count > 0, err
+}
+
 func (r *UserRepository) UpdateLastLogin(ctx context.Context, userID uint64, at time.Time) error {
 	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", userID).Update("last_login_at", at).Error
 }
