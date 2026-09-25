@@ -18,8 +18,23 @@ func NewNotificationRepository(db *gorm.DB) *NotificationRepository {
 // Create inserts a notification, ignoring a duplicate uuid. The consumer derives
 // the uuid from the source event and recipient, which makes redelivered events
 // idempotent without an extra columns.
-func (r *NotificationRepository) Create(ctx context.Context, notification *model.Notification) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(notification).Error
+// Create inserts a notification and reports whether this invocation created it.
+// Consumers use the boolean to avoid broadcasting a duplicate delivery hint
+// when Kafka redelivers an already processed event.
+func (r *NotificationRepository) Create(ctx context.Context, notification *model.Notification, events []*model.OutboxEvent) (bool, error) {
+	created := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(notification)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		created = true
+		return enqueueOutboxEvents(tx, events)
+	})
+	return created, err
 }
 
 func (r *NotificationRepository) ListByUser(ctx context.Context, userID uint64, page, pageSize int) ([]model.Notification, int64, error) {

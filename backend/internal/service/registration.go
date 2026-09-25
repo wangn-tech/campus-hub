@@ -95,9 +95,11 @@ func (s *RegistrationService) Register(ctx context.Context, user *model.User, ac
 	}
 
 	created, err := newOutboxEvent("registration.created", "registration", registration.UUID, trace, map[string]any{
-		"activity_id": activity.UUID,
-		"user_id":     user.UUID,
-		"status":      registration.Status,
+		"activity_id":     activity.UUID,
+		"registration_id": registration.UUID,
+		"user_id":         user.UUID,
+		"to_status":       registration.Status,
+		"status":          registration.Status,
 	})
 	if err != nil {
 		return nil, err
@@ -183,8 +185,12 @@ func (s *RegistrationService) Cancel(ctx context.Context, user *model.User, regi
 		},
 	}
 	cancelled, err := newOutboxEvent("registration.cancelled", "registration", registration.UUID, trace, map[string]any{
-		"activity_id": activity.UUID,
-		"user_id":     user.UUID,
+		"activity_id":     activity.UUID,
+		"registration_id": registration.UUID,
+		"user_id":         user.UUID,
+		"from_status":     registration.Status,
+		"to_status":       uint8(model.RegistrationCancelled),
+		"status":          uint8(model.RegistrationCancelled),
 	})
 	if err != nil {
 		return err

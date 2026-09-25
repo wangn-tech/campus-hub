@@ -47,9 +47,11 @@ flowchart LR
 | Topic | Key | 主要事件 | 消费者组 |
 |---|---|---|---|
 | `campushub.activity.events.v1` | `activity_id` | 活动创建、更新、状态变化、取消、删除 | `campushub.search-indexer`、`campushub.statistics-worker` |
-| `campushub.registration.events.v1` | `registration_id` | 报名申请、审批通过、拒绝、超时、取消 | `campushub.notification-worker`、`campushub.chat-membership`、`campushub.chat-delivery.{instance_id}` |
+| `campushub.registration.events.v1` | `registration_id` | 报名申请、审批通过、拒绝、超时、取消 | `campushub.notification-worker`、`campushub.chat-membership`、`campushub.realtime-delivery.{instance_id}` |
 | `campushub.ticket.events.v1` | `ticket_id` | 票据生成、核销、作废、过期 | `campushub.notification-worker`、`campushub.audit-worker` |
 | `campushub.notification.events.v1` | `user_id` | 通知创建、已读、推送 | `campushub.notification-worker` |
+| `campushub.verification.events.v1` | `verification_id` | 学生认证提交、确认、取消与审核结果 | `campushub.realtime-delivery.{instance_id}` |
+| `campushub.realtime.events.v1` | `user_id` | 已持久化通知的实时投递提示 | `campushub.realtime-delivery.{instance_id}` |
 | `campushub.chat.events.v1` | `group_id` | 群消息、成员变化、未读更新 | `campushub.chat-delivery.{instance_id}` |
 | `campushub.file.events.v1` | `file_id` | 文件上传完成、审核、清理 | `campushub.file-worker` |
 | `campushub.system.audit.v1` | `operator_id` | 登录、权限、管理操作审计 | `campushub.audit-worker` |
@@ -149,6 +151,8 @@ campushub.{domain}.events.v1
 - `notification.created`；
 - `notification.read`。
 
+通知写入成功时，同一数据库事务还会写入 `realtime.notification_created` outbox 事件；relay 将其投递到 `campushub.realtime.events.v1`。该事件只是 WebSocket 提示，离线补偿仍以通知 HTTP 接口为准。
+
 ### 6.5 文件与系统事件
 
 - `file.uploaded`；
@@ -194,10 +198,11 @@ Relay 可以：
 
 | 消费者组 | 职责 |
 |---|---|
-| `campushub.search-indexer` | 写入或更新 Elasticsearch 活动索引 |
+| `campushub.search-indexer` | 消费 `campushub.activity.events.v1`，回读 MySQL 后以活动版本写入 Elasticsearch 索引 |
 | `campushub.notification-worker` | 发送通知、更新未读计数 |
 | `campushub.chat-membership` | 依据报名审批/取消/拒绝/超时事件维护活动群成员关系 |
 | `campushub.chat-delivery.{instance_id}` | 将消息投递到 WebSocket；每个实例使用独立消费者组接收全部聊天事件 |
+| `campushub.realtime-delivery.{instance_id}` | 将通知、学生认证与报名状态变化投递到 WebSocket；每个实例使用独立消费者组接收全部投递提示和业务状态事件 |
 | `campushub.statistics-worker` | 更新浏览量、标签统计和活动统计 |
 | `campushub.audit-worker` | 写入审计日志 |
 | `campushub.file-worker` | 文件处理和清理 |

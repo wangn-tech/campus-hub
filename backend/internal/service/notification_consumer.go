@@ -89,7 +89,11 @@ func (c *NotificationConsumer) notifyOrganizer(ctx context.Context, event notifi
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	return c.create(ctx, event, activity.OrganizerID, "registration_created", "有新的活动报名", content)
+	owners, err := c.users.FindByIDs(ctx, []uint64{activity.OrganizerID})
+	if err != nil || len(owners) == 0 {
+		return err
+	}
+	return c.create(ctx, event, &owners[0], "registration_created", "有新的活动报名", content)
 }
 
 func (c *NotificationConsumer) notifyRegistrant(ctx context.Context, event notificationEvent, kind, title, format string) error {
@@ -106,10 +110,10 @@ func (c *NotificationConsumer) notifyRegistrant(ctx context.Context, event notif
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	return c.create(ctx, event, user.ID, kind, title, fmt.Sprintf(format, activityTitle))
+	return c.create(ctx, event, user, kind, title, fmt.Sprintf(format, activityTitle))
 }
 
-func (c *NotificationConsumer) create(ctx context.Context, event notificationEvent, userID uint64, kind, title, content string) error {
+func (c *NotificationConsumer) create(ctx context.Context, event notificationEvent, user *model.User, kind, title, content string) error {
 	data, err := json.Marshal(map[string]string{
 		"activity_id":     event.Payload.ActivityID,
 		"registration_id": event.Payload.RegistrationID,
@@ -118,15 +122,24 @@ func (c *NotificationConsumer) create(ctx context.Context, event notificationEve
 		return err
 	}
 	encoded := string(data)
-	return c.notifications.Create(ctx, &model.Notification{
-		UUID:      notificationKey(event.EventID, userID),
-		UserID:    userID,
+	notification := model.Notification{
+		UUID:      notificationKey(event.EventID, user.ID),
+		UserID:    user.ID,
 		Type:      kind,
 		Title:     title,
 		Content:   content,
 		Data:      &encoded,
 		CreatedAt: time.Now().UTC(),
-	})
+	}
+	hint, err := newNotificationDeliveryEvent(user.UUID, notification, event.TraceID)
+	if err != nil {
+		return err
+	}
+	returnErr := error(nil)
+	if _, err := c.notifications.Create(ctx, &notification, []*model.OutboxEvent{hint}); err != nil {
+		returnErr = err
+	}
+	return returnErr
 }
 
 // notificationKey derives a stable id per (event, recipient), so a redelivered

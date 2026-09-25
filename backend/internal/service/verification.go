@@ -77,7 +77,11 @@ func (s *VerificationService) Submit(ctx context.Context, u *model.User, in Veri
 	now := time.Now().UTC()
 	v := &model.StudentVerification{UUID: uuid.NewString(), UserID: u.ID, Status: uint8(model.VerificationPendingConfirm), RealNameEncrypted: real, SchoolName: in.SchoolName, StudentIDEncrypted: sid, StudentIDHash: hex.EncodeToString(h.Sum(nil)), Department: in.Department, AdmissionYear: in.AdmissionYear, FrontFileID: &front.ID, BackFileID: &back.ID, SubmittedAt: &now}
 	event := &model.StudentVerificationEvent{UUID: uuid.NewString(), UserID: u.ID, FromStatus: uint8(model.VerificationInitialized), ToStatus: uint8(model.VerificationPendingConfirm), EventType: "submitted", OperatorID: u.ID, OperatorType: 1, TraceID: trace}
-	if err := s.repo.Create(ctx, v, event); err != nil {
+	outbox, err := verificationOutboxEvent("verification.submitted", v, u.UUID, uint8(model.VerificationPendingConfirm), "OCR 识别完成，请确认", trace)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.Create(ctx, v, event, outbox); err != nil {
 		return nil, err
 	}
 	_ = s.files.AddReference(ctx, front.ID, "student_verification", v.ID, "front")
@@ -89,14 +93,31 @@ func (s *VerificationService) Confirm(ctx context.Context, u *model.User, id, tr
 	if e != nil || v.UUID != id || v.Status != uint8(model.VerificationPendingConfirm) {
 		return ErrForbidden
 	}
-	return s.repo.Transition(ctx, v, uint8(model.VerificationManualReview), "confirmed", "", trace)
+	outbox, err := verificationOutboxEvent("verification.confirmed", v, u.UUID, uint8(model.VerificationManualReview), "认证资料已提交人工审核", trace)
+	if err != nil {
+		return err
+	}
+	return s.repo.Transition(ctx, v, uint8(model.VerificationManualReview), "confirmed", "", trace, outbox)
 }
 func (s *VerificationService) Cancel(ctx context.Context, u *model.User, id, reason, trace string) error {
 	v, e := s.repo.Current(ctx, u.ID)
 	if e != nil || v.UUID != id || (v.Status != uint8(model.VerificationPendingConfirm) && v.Status != uint8(model.VerificationManualReview)) {
 		return ErrForbidden
 	}
-	return s.repo.Transition(ctx, v, uint8(model.VerificationCancelled), "cancelled", reason, trace)
+	outbox, err := verificationOutboxEvent("verification.cancelled", v, u.UUID, uint8(model.VerificationCancelled), "认证申请已取消", trace)
+	if err != nil {
+		return err
+	}
+	return s.repo.Transition(ctx, v, uint8(model.VerificationCancelled), "cancelled", reason, trace, outbox)
+}
+
+func verificationOutboxEvent(eventType string, verification *model.StudentVerification, userUUID string, status uint8, message, trace string) (*model.OutboxEvent, error) {
+	return newOutboxEvent(eventType, "student_verification", verification.UUID, trace, map[string]any{
+		"verification_id": verification.UUID,
+		"user_id":         userUUID,
+		"status":          status,
+		"message":         message,
+	})
 }
 func (s *VerificationService) encrypt(value string) (string, error) {
 	b, e := aes.NewCipher(s.key)

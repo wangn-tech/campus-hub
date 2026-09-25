@@ -23,6 +23,7 @@ const (
 	EventMarkRead                  = "mark_read"
 	EventError                     = "error"
 	EventNotification              = "notification"
+	EventVerifyProgress            = "verify_progress"
 	EventRegistrationStatusChanged = "registration_status_changed"
 )
 

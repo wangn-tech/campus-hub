@@ -126,7 +126,8 @@ func run() error {
 	chatHandler := handler.NewChatHandler(chatService, userService)
 	chatMembershipConsumer := service.NewChatMembershipConsumer(chatRepository, activityRepository, userRepository, logger)
 	chatDeliveryConsumer := service.NewChatDeliveryConsumer(chatHub, logger)
-	topics := append(append(service.RelayTopics(), service.NotificationTopics...), service.ChatTopics()...)
+	realtimeDeliveryConsumer := service.NewRealtimeDeliveryConsumer(chatHub, registrationRepository, ticketRepository, chatRepository, logger)
+	topics := append(append(append(service.RelayTopics(), service.NotificationTopics...), service.ChatTopics()...), service.RealtimeTopics()...)
 	ensureCtx, cancelEnsure := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := kafkaClient.EnsureTopics(ensureCtx, topics...); err != nil {
 		logger.Warn("ensure kafka topics", zap.Error(err))
@@ -137,6 +138,7 @@ func run() error {
 	go runConsumer(consumerCtx, "notification", notificationConsumer.HandleEvent, service.NotificationConsumerGroup, service.NotificationTopics, kafkaClient, logger)
 	go runConsumer(consumerCtx, "chat membership", chatMembershipConsumer.HandleEvent, service.ChatMembershipConsumerGroup, service.ChatMembershipTopics, kafkaClient, logger)
 	go runConsumer(consumerCtx, "chat delivery", chatDeliveryConsumer.HandleEvent, service.ChatDeliveryGroup(cfg.Kafka.ChatDeliveryGroupPrefix, cfg.App.InstanceID), service.ChatTopics(), kafkaClient, logger)
+	go runConsumer(consumerCtx, "realtime delivery", realtimeDeliveryConsumer.HandleEvent, service.RealtimeDeliveryGroup(cfg.Kafka.RealtimeDeliveryGroupPrefix, cfg.App.InstanceID), service.RealtimeTopics(), kafkaClient, logger)
 	verificationService, err := service.NewVerificationService(verificationRepository, fileRepository, cfg.Security)
 	if err != nil {
 		return fmt.Errorf("initialize verification service: %w", err)

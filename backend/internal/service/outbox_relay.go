@@ -25,8 +25,10 @@ var relayTopics = []string{
 	"campushub.registration.events.v1",
 	"campushub.ticket.events.v1",
 	"campushub.notification.events.v1",
+	"campushub.verification.events.v1",
 	"campushub.chat.events.v1",
 	"campushub.file.events.v1",
+	realtimeEventsTopic,
 	"campushub.system.audit.v1",
 }
 
@@ -104,10 +106,14 @@ func eventTopic(eventType string) string {
 		return "campushub.ticket.events.v1"
 	case strings.HasPrefix(eventType, "notification."):
 		return "campushub.notification.events.v1"
+	case strings.HasPrefix(eventType, "verification."):
+		return "campushub.verification.events.v1"
 	case strings.HasPrefix(eventType, "chat."):
 		return "campushub.chat.events.v1"
 	case strings.HasPrefix(eventType, "file."):
 		return "campushub.file.events.v1"
+	case strings.HasPrefix(eventType, "realtime."):
+		return realtimeEventsTopic
 	default:
 		return "campushub.system.audit.v1"
 	}

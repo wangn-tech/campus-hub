@@ -42,6 +42,7 @@ kafka:
   consumer_group: campushub-backend
   chat_delivery_group_prefix: campushub.chat-delivery
   enable_consumers: true
+  realtime_delivery_group_prefix: campushub.realtime-delivery
   sasl_enabled: false
 elasticsearch:
   addresses:

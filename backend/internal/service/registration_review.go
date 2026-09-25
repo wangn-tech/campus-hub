@@ -225,6 +225,8 @@ func (s *RegistrationService) reviewEvents(ctx context.Context, registration *mo
 	payload := map[string]any{
 		"activity_id":     activity.UUID,
 		"registration_id": registration.UUID,
+		"from_status":     registration.Status,
+		"to_status":       status,
 		"status":          status,
 	}
 	users, err := s.users.FindByIDs(ctx, []uint64{registration.UserID})

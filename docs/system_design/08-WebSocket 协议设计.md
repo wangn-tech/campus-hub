@@ -205,7 +205,7 @@ sequenceDiagram
 4. 通过 Kafka 的实例独立消费者组广播到其他实例；
 5. 向群内其他成员推送 `new_message`。
 
-> **实现状态（阶段 5）**：已实现 `auth`/`auth_success`/`auth_failed`、`ping`/`pong`、`send_message`/`ack`/`new_message`、`mark_read`、`error` 与连接后的房间恢复；`send_message` 用 `client_message_id` 幂等（同一 ID 重发返回原消息）。消息落库后直接写 `campushub.chat.events.v1`（不经 outbox，因为消息本体已持久化、广播只是投递提示，且聊天对延迟敏感），各实例用自己的消费者组 `campushub.chat-delivery.{instance_id}` 投递到本实例连接。`notification`、`verify_progress`、`registration_status_changed` 三个服务端事件尚未推送，留待后续阶段。
+> **实现状态（阶段 5）**：已实现 `auth`/`auth_success`/`auth_failed`、`ping`/`pong`、`send_message`/`ack`/`new_message`、`mark_read`、`error` 与连接后的房间恢复；`send_message` 用 `client_message_id` 幂等（同一 ID 重发返回原消息）。聊天消息落库后直接写 `campushub.chat.events.v1`；通知、学生认证与报名状态仍按 outbox 可靠发布。各实例分别使用 `campushub.chat-delivery.{instance_id}` 与 `campushub.realtime-delivery.{instance_id}` 消费组向本机连接投递，`notification`、`verify_progress`、`registration_status_changed` 均已实现；离线结果通过 HTTP 查询补齐。
 
 ### 7.2 标记已读
 
@@ -272,7 +272,8 @@ ACK 用于确认客户端消息已被服务端接收并完成必要持久化。
     "notification_id": "notification-uuid",
     "notification_type": "system",
     "title": "通知标题",
-    "content": "通知内容"
+    "content": "通知内容",
+    "created_at": 1767232800000
   }
 }
 ```
@@ -384,7 +385,7 @@ ACK 用于确认客户端消息已被服务端接收并完成必要持久化。
 
 ### 11.2 跨实例广播
 
-Kafka 作为主广播机制，Redis 只用于在线状态、连接定位和房间关系。每个运行实例使用独立的消费者组，例如 `campushub.chat-delivery.{instance_id}`，确保每个实例都能收到全部聊天投递事件；同一实例内的消费者仍可通过组内分工扩展。
+Kafka 作为主广播机制，Redis 只用于在线状态、连接定位和房间关系。每个运行实例使用独立的消费者组，例如 `campushub.chat-delivery.{instance_id}`（群消息）和 `campushub.realtime-delivery.{instance_id}`（通知、认证、报名状态），确保每个实例都能收到全部相关投递事件；同一实例内的消费者仍可通过组内分工扩展。
 
 ```mermaid
 flowchart LR
