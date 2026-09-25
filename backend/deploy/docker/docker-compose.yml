@@ -81,7 +81,6 @@ services:
     mem_limit: 1g
 
   minio:
-    profiles: [storage]
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     environment:
       MINIO_ROOT_USER: ${CAMPUSHUB_MINIO_ROOT_USER:-minioadmin}
@@ -98,6 +97,29 @@ services:
       timeout: 10s
       retries: 12
     mem_limit: 512m
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    environment:
+      MINIO_ROOT_USER: ${CAMPUSHUB_MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${CAMPUSHUB_MINIO_ROOT_PASSWORD:?set CAMPUSHUB_MINIO_ROOT_PASSWORD}
+      CAMPUSHUB_STORAGE_BUCKET: ${CAMPUSHUB_STORAGE_BUCKET:-campushub}
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ["mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; mc mb --ignore-existing local/$${CAMPUSHUB_STORAGE_BUCKET}"]
+    depends_on:
+      minio: {condition: service_healthy}
+
+  mailpit:
+    image: axllent/mailpit:v1.21.5
+    ports:
+      - "1025:1025"
+      - "18025:8025"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8025/livez"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 128m
 
   kafka-ui:
     profiles: [tools]
@@ -149,7 +171,7 @@ services:
       dockerfile: deploy/docker/Dockerfile
     environment:
       CAMPUSHUB_CONFIG_FILE: /app/configs/config.prod.yaml.example
-      CAMPUSHUB_APP_ENV: prod
+      CAMPUSHUB_APP_ENV: dev
       CAMPUSHUB_MYSQL_HOST: mysql
       CAMPUSHUB_MYSQL_PORT: 3306
       CAMPUSHUB_MYSQL_USERNAME: ${CAMPUSHUB_MYSQL_USERNAME:-campushub}
@@ -160,6 +182,19 @@ services:
       CAMPUSHUB_REDIS_PASSWORD: ${CAMPUSHUB_REDIS_PASSWORD:?set CAMPUSHUB_REDIS_PASSWORD}
       CAMPUSHUB_KAFKA_BROKERS: kafka:9092
       CAMPUSHUB_ELASTICSEARCH_ADDRESSES: http://elasticsearch:9200
+
+      CAMPUSHUB_STORAGE_DRIVER: minio
+      CAMPUSHUB_STORAGE_ENDPOINT: minio:9000
+      CAMPUSHUB_STORAGE_ACCESS_KEY: ${CAMPUSHUB_MINIO_ROOT_USER:-minioadmin}
+      CAMPUSHUB_STORAGE_SECRET_KEY: ${CAMPUSHUB_MINIO_ROOT_PASSWORD:?set CAMPUSHUB_MINIO_ROOT_PASSWORD}
+      CAMPUSHUB_STORAGE_BUCKET: ${CAMPUSHUB_STORAGE_BUCKET:-campushub}
+      CAMPUSHUB_STORAGE_USE_SSL: "false"
+      CAMPUSHUB_MAIL_HOST: mailpit
+      CAMPUSHUB_MAIL_PORT: 1025
+      CAMPUSHUB_MAIL_FROM: noreply@campushub.local
+      CAMPUSHUB_MAIL_TLS_MODE: none
+      CAMPUSHUB_SECURITY_PII_ENCRYPTION_KEY: ${CAMPUSHUB_PII_ENCRYPTION_KEY:?set CAMPUSHUB_PII_ENCRYPTION_KEY}
+      CAMPUSHUB_SECURITY_PII_HASH_KEY: ${CAMPUSHUB_PII_HASH_KEY:?set CAMPUSHUB_PII_HASH_KEY}
       CAMPUSHUB_JWT_ACCESS_SECRET: ${CAMPUSHUB_JWT_ACCESS_SECRET:?set CAMPUSHUB_JWT_ACCESS_SECRET}
       CAMPUSHUB_JWT_REFRESH_SECRET: ${CAMPUSHUB_JWT_REFRESH_SECRET:?set CAMPUSHUB_JWT_REFRESH_SECRET}
     ports:
@@ -169,6 +204,8 @@ services:
       redis: {condition: service_healthy}
       kafka: {condition: service_healthy}
       elasticsearch: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+      mailpit: {condition: service_healthy}
 volumes:
   mysql-data:
   redis-data:

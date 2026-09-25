@@ -20,7 +20,7 @@ func Auth(authService *service.AuthService) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		userUUID, err := authService.ParseAccessToken(parts[1])
+		userUUID, err := authService.Authenticate(c.Request.Context(), parts[1])
 		if err != nil {
 			httpx.Error(c, http.StatusUnauthorized, 101401, "invalid access token")
 			c.Abort()

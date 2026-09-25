@@ -17,7 +17,9 @@ import (
 	espkg "github.com/wangn-tech/campus-hub/internal/platform/elasticsearch"
 	kafkapkg "github.com/wangn-tech/campus-hub/internal/platform/kafka"
 	"github.com/wangn-tech/campus-hub/internal/platform/logging"
+	mailpkg "github.com/wangn-tech/campus-hub/internal/platform/mail"
 	redispkg "github.com/wangn-tech/campus-hub/internal/platform/redis"
+	storagepkg "github.com/wangn-tech/campus-hub/internal/platform/storage"
 	"github.com/wangn-tech/campus-hub/internal/repository"
 	"github.com/wangn-tech/campus-hub/internal/router"
 	"github.com/wangn-tech/campus-hub/internal/service"
@@ -79,6 +81,10 @@ func run() error {
 			logger.Warn("close elasticsearch", zap.Error(err))
 		}
 	}()
+	storageClient, err := storagepkg.Open(cfg.Storage)
+	if err != nil {
+		return fmt.Errorf("open minio: %w", err)
+	}
 
 	if cfg.App.Env == "prod" {
 		gin.SetMode(gin.ReleaseMode)
@@ -86,15 +92,24 @@ func run() error {
 		gin.SetMode(gin.TestMode)
 	}
 	userRepository := repository.NewUserRepository(db)
-	authService := service.NewAuthService(userRepository, cfg.JWT)
+	fileRepository := repository.NewFileRepository(db)
+	tagRepository := repository.NewTagRepository(db)
+	verificationRepository := repository.NewVerificationRepository(db)
+	authService := service.NewAuthService(userRepository, cfg.JWT, redisClient, mailpkg.New(cfg.Mail))
 	authHandler := handler.NewAuthHandler(authService)
+	userService := service.NewUserService(userRepository, tagRepository, fileRepository)
+	fileService := service.NewFileService(fileRepository, storageClient, cfg.Storage)
+	verificationService, err := service.NewVerificationService(verificationRepository, fileRepository, cfg.Security)
+	if err != nil {
+		return fmt.Errorf("initialize verification service: %w", err)
+	}
 	readiness := health.New(cfg.Observability.ReadinessTimeout,
 		health.CheckFunc{CheckName: "mysql", Fn: func(ctx context.Context) error { return database.Check(ctx, db) }},
 		health.CheckFunc{CheckName: "redis", Fn: func(ctx context.Context) error { return redispkg.Check(ctx, redisClient) }},
 		health.CheckFunc{CheckName: "kafka", Fn: func(ctx context.Context) error { return kafkapkg.Check(ctx, kafkaClient) }},
 		health.CheckFunc{CheckName: "elasticsearch", Fn: func(ctx context.Context) error { return esClient.Check(ctx) }},
 	)
-	engine := router.New(router.Dependencies{AuthHandler: authHandler, Readiness: readiness, Logger: logger, AllowedOrigins: cfg.HTTP.AllowedOrigins})
+	engine := router.New(router.Dependencies{AuthHandler: authHandler, UserHandler: handler.NewUserHandler(userService, fileService), FileHandler: handler.NewFileHandler(fileService, userService), VerificationHandler: handler.NewVerificationHandler(verificationService, userService), AuthService: authService, Readiness: readiness, Logger: logger, AllowedOrigins: cfg.HTTP.AllowedOrigins})
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.HTTP.Host, cfg.HTTP.Port),
 		Handler:      engine,
