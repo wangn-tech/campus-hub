@@ -344,6 +344,45 @@ paths:
       operationId: markAllNotificationsRead
       security: [{bearerAuth: []}]
       responses: {'200': {$ref: '#/components/responses/Success'}}
+  /api/v1/users/me/groups:
+    get:
+      operationId: listMyGroups
+      description: Groups the caller is an active member of, newest first.
+      security: [{bearerAuth: []}]
+      responses: {'200': {$ref: '#/components/responses/Success'}}
+  /api/v1/groups/{id}:
+    get:
+      operationId: getGroup
+      description: Active group members only.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}}
+  /api/v1/groups/{id}/members:
+    get:
+      operationId: listGroupMembers
+      description: Active group members only.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/UUID'}]
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}}
+  /api/v1/groups/{id}/messages:
+    get:
+      operationId: listGroupMessages
+      description: Newest-first history for active group members.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/UUID'}
+        - {name: after_id, in: query, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses: {'200': {$ref: '#/components/responses/Success'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}}
+  /api/v1/messages/offline:
+    get:
+      operationId: listOfflineMessages
+      description: Messages across the caller's groups newer than `after_id`.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: after_id, in: query, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses: {'200': {$ref: '#/components/responses/Success'}}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}

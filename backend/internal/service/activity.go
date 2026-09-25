@@ -421,7 +421,36 @@ func (s *ActivityService) transition(ctx context.Context, activity *model.Activi
 		TraceID:      trace,
 		CreatedAt:    now,
 	}
-	if err := s.activities.Transition(ctx, activity.ID, activity.Status, values, log); err != nil {
+	input := repository.ActivityTransitionInput{
+		ActivityID: activity.ID,
+		FromStatus: activity.Status,
+		Values:     values,
+		Log:        log,
+	}
+	switch model.ActivityStatus(to) {
+	case model.ActivityPublished:
+		// Publishing creates the activity group with the organizer inside it.
+		input.Group = &model.ChatGroup{
+			UUID:       uuid.NewString(),
+			ActivityID: activity.ID,
+			Name:       activity.Title,
+			Status:     model.ChatGroupActive,
+			OwnerID:    activity.OrganizerID,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		input.GroupOwner = &model.ChatGroupMember{
+			UserID:    activity.OrganizerID,
+			Role:      model.ChatMemberRoleOwner,
+			Status:    model.ChatMemberStatusActive,
+			JoinedAt:  now,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+	case model.ActivityCancelled:
+		input.DissolveGroup = true
+	}
+	if err := s.activities.Transition(ctx, input); err != nil {
 		if errors.Is(err, repository.ErrConcurrentUpdate) {
 			return ErrActivityConflict
 		}

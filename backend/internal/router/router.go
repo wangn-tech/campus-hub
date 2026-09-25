@@ -20,6 +20,7 @@ type Dependencies struct {
 	RegistrationHandler *handler.RegistrationHandler
 	CheckInHandler      *handler.CheckInHandler
 	NotificationHandler *handler.NotificationHandler
+	ChatHandler         *handler.ChatHandler
 	Authenticator       middleware.Authenticator
 	AdminChecker        middleware.AdminChecker
 	Readiness           *health.Service
@@ -64,7 +65,7 @@ func New(dependencies Dependencies) *gin.Engine {
 		}
 		detail.GET("/activities/:id", dependencies.ActivityHandler.Detail)
 	}
-	if dependencies.Authenticator == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil || dependencies.ActivityHandler == nil || dependencies.RegistrationHandler == nil || dependencies.CheckInHandler == nil || dependencies.NotificationHandler == nil {
+	if dependencies.Authenticator == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil || dependencies.ActivityHandler == nil || dependencies.RegistrationHandler == nil || dependencies.CheckInHandler == nil || dependencies.NotificationHandler == nil || dependencies.ChatHandler == nil {
 		return r
 	}
 	protected := r.Group("/api/v1")
@@ -102,6 +103,11 @@ func New(dependencies Dependencies) *gin.Engine {
 	protected.GET("/notifications/unread-count", dependencies.NotificationHandler.UnreadCount)
 	protected.POST("/notifications/read", dependencies.NotificationHandler.MarkRead)
 	protected.POST("/notifications/read-all", dependencies.NotificationHandler.MarkAllRead)
+	protected.GET("/users/me/groups", dependencies.ChatHandler.MyGroups)
+	protected.GET("/groups/:id", dependencies.ChatHandler.Group)
+	protected.GET("/groups/:id/members", dependencies.ChatHandler.Members)
+	protected.GET("/groups/:id/messages", dependencies.ChatHandler.Messages)
+	protected.GET("/messages/offline", dependencies.ChatHandler.Offline)
 	if dependencies.AdminChecker != nil {
 		admin := protected.Group("")
 		admin.Use(middleware.RequireAdmin(dependencies.AdminChecker))

@@ -47,7 +47,7 @@ flowchart LR
 | Topic | Key | 主要事件 | 消费者组 |
 |---|---|---|---|
 | `campushub.activity.events.v1` | `activity_id` | 活动创建、更新、状态变化、取消、删除 | `campushub.search-indexer`、`campushub.statistics-worker` |
-| `campushub.registration.events.v1` | `registration_id` | 报名申请、审批通过、拒绝、超时、取消 | `campushub.notification-worker`、`campushub.chat-delivery.{instance_id}` |
+| `campushub.registration.events.v1` | `registration_id` | 报名申请、审批通过、拒绝、超时、取消 | `campushub.notification-worker`、`campushub.chat-membership`、`campushub.chat-delivery.{instance_id}` |
 | `campushub.ticket.events.v1` | `ticket_id` | 票据生成、核销、作废、过期 | `campushub.notification-worker`、`campushub.audit-worker` |
 | `campushub.notification.events.v1` | `user_id` | 通知创建、已读、推送 | `campushub.notification-worker` |
 | `campushub.chat.events.v1` | `group_id` | 群消息、成员变化、未读更新 | `campushub.chat-delivery.{instance_id}` |
@@ -194,6 +194,7 @@ Relay 可以：
 |---|---|
 | `campushub.search-indexer` | 写入或更新 Elasticsearch 活动索引 |
 | `campushub.notification-worker` | 发送通知、更新未读计数 |
+| `campushub.chat-membership` | 依据报名审批/取消/拒绝/超时事件维护活动群成员关系 |
 | `campushub.chat-delivery.{instance_id}` | 将消息投递到 WebSocket；每个实例使用独立消费者组接收全部聊天事件 |
 | `campushub.statistics-worker` | 更新浏览量、标签统计和活动统计 |
 | `campushub.audit-worker` | 写入审计日志 |

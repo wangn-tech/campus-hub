@@ -248,15 +248,15 @@ checkin_detail="$(curl --silent --show-error "http://127.0.0.1:${integration_por
 checkin_ticket="$(sed -n 's/.*"ticket":{"id":"\([^"]*\)".*/\1/p' <<<"${checkin_detail}")"
 checkin_code="$(sed -n 's/.*"ticket":{"id":"[^"]*","code":"\([^"]*\)".*/\1/p' <<<"${checkin_detail}")"
 [[ -n "${checkin_ticket}" && -n "${checkin_code}" ]]
-invalid_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-invalid.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data '{"client_request_id":"ci-invalid"}')"
+invalid_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-invalid.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "{\"client_request_id\":\"ci-invalid-${run_id}\"}")"
 [[ "${invalid_checkin_status}" == "400" ]]
-first_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "{\"code\":\"${checkin_code}\",\"client_request_id\":\"ci-checkin-1\"}")"
+first_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "{\"code\":\"${checkin_code}\",\"client_request_id\":\"ci-checkin-1-${run_id}\"}")"
 [[ "${first_checkin_status}" == "200" ]]
-replay_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-replay.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "{\"code\":\"${checkin_code}\",\"client_request_id\":\"ci-checkin-1\"}")"
+replay_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-replay.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "{\"code\":\"${checkin_code}\",\"client_request_id\":\"ci-checkin-1-${run_id}\"}")"
 [[ "${replay_checkin_status}" == "200" ]]
-duplicate_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-duplicate.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "{\"ticket_id\":\"${checkin_ticket}\",\"client_request_id\":\"ci-checkin-2\"}")"
+duplicate_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-duplicate.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "{\"ticket_id\":\"${checkin_ticket}\",\"client_request_id\":\"ci-checkin-2-${run_id}\"}")"
 [[ "${duplicate_checkin_status}" == "409" ]]
-foreign_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-foreign.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${other_token}" --header 'Content-Type: application/json' --data "{\"ticket_id\":\"${checkin_ticket}\",\"client_request_id\":\"ci-checkin-3\"}")"
+foreign_checkin_status="$(curl --silent --show-error --output "${temporary_dir}/checkin-foreign.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/check-ins" --header "Authorization: Bearer ${other_token}" --header 'Content-Type: application/json' --data "{\"ticket_id\":\"${checkin_ticket}\",\"client_request_id\":\"ci-checkin-3-${run_id}\"}")"
 [[ "${foreign_checkin_status}" == "403" ]]
 used_ticket_detail="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/tickets/${checkin_ticket}" --header "Authorization: Bearer ${access_token}")"
 grep -q '"status":1' <<<"${used_ticket_detail}"
@@ -331,5 +331,59 @@ read_all_status="$(curl --silent --show-error --output "${temporary_dir}/notific
 [[ "${read_all_status}" == "200" ]]
 unread_after="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/notifications/unread-count" --header "Authorization: Bearer ${access_token}")"
 grep -q '"count":0' <<<"${unread_after}"
+
+echo "Verifying activity group chat"
+# Publishing an activity creates its group with the organizer as owner, in the
+# same transaction as the approval.
+chat_activity="$(create_published_activity true "integration chat activity")"
+chat_group="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT g.uuid FROM chat_groups g JOIN activities a ON a.id = g.activity_id WHERE a.uuid = '${chat_activity}'" 2>/dev/null | tr -d '[:space:]')"
+[[ -n "${chat_group}" ]]
+organizer_groups="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/users/me/groups" --header "Authorization: Bearer ${access_token}")"
+grep -q "${chat_group}" <<<"${organizer_groups}"
+grep -q "${chat_activity}" <<<"${organizer_groups}"
+# A second user registers and the organizer approves, which adds the registrant
+# to the group through the chat membership consumer.
+chat_register_status="$(curl --silent --show-error --output "${temporary_dir}/chat-registration.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${chat_activity}/registrations" --header "Authorization: Bearer ${other_token}")"
+[[ "${chat_register_status}" == "200" ]]
+chat_registration="$(sed -n 's/.*"data":{"id":"\([^"]*\)".*/\1/p' "${temporary_dir}/chat-registration.json")"
+[[ -n "${chat_registration}" ]]
+chat_approve_status="$(curl --silent --show-error --output "${temporary_dir}/chat-approved.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/registrations/${chat_registration}/approve" --header "Authorization: Bearer ${access_token}")"
+[[ "${chat_approve_status}" == "200" ]]
+active_members=""
+for _ in $(seq 1 30); do
+  active_members="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM chat_group_members WHERE group_id = (SELECT id FROM chat_groups WHERE uuid = '${chat_group}') AND status = 1" 2>/dev/null | tr -d '[:space:]')"
+  [[ "${active_members}" == "2" ]] && break
+  sleep 1
+done
+[[ "${active_members}" == "2" ]]
+group_detail="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/groups/${chat_group}" --header "Authorization: Bearer ${other_token}")"
+grep -q "${chat_group}" <<<"${group_detail}"
+group_members="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/groups/${chat_group}/members" --header "Authorization: Bearer ${other_token}")"
+[[ "$(grep -o '"role":' <<<"${group_members}" | wc -l | tr -d '[:space:]')" == "2" ]]
+group_messages="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/groups/${chat_group}/messages" --header "Authorization: Bearer ${other_token}")"
+grep -q '"items":\[\]' <<<"${group_messages}"
+# A user who is neither the organizer nor a registrant cannot read the group.
+register_user outsider
+outsider_token="${access_token}"
+access_token="${primary_token}"
+outsider_status="$(curl --silent --show-error --output "${temporary_dir}/chat-outsider.json" --write-out '%{http_code}' "http://127.0.0.1:${integration_port}/api/v1/groups/${chat_group}" --header "Authorization: Bearer ${outsider_token}")"
+[[ "${outsider_status}" == "403" ]]
+# Cancelling the registration removes the registrant from the group.
+chat_cancel_status="$(curl --silent --show-error --output "${temporary_dir}/chat-cancelled.json" --write-out '%{http_code}' --request DELETE "http://127.0.0.1:${integration_port}/api/v1/registrations/${chat_registration}" --header "Authorization: Bearer ${other_token}")"
+[[ "${chat_cancel_status}" == "200" ]]
+other_groups=""
+for _ in $(seq 1 30); do
+  other_groups="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/users/me/groups" --header "Authorization: Bearer ${other_token}")"
+  if ! grep -q "${chat_group}" <<<"${other_groups}"; then
+    break
+  fi
+  sleep 1
+done
+if grep -q "${chat_group}" <<<"${other_groups}"; then
+  echo "the group must disappear from a registrant who cancelled" >&2
+  exit 1
+fi
+members_after="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/groups/${chat_group}/members" --header "Authorization: Bearer ${access_token}")"
+[[ "$(grep -o '"role":' <<<"${members_after}" | wc -l | tr -d '[:space:]')" == "1" ]]
 
 echo "Integration test passed"

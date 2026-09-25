@@ -104,6 +104,7 @@ func run() error {
 	checkInRepository := repository.NewCheckInRepository(db)
 	outboxRepository := repository.NewOutboxRepository(db)
 	notificationRepository := repository.NewNotificationRepository(db)
+	chatRepository := repository.NewChatRepository(db)
 	verificationRepository := repository.NewVerificationRepository(db)
 	authService := service.NewAuthService(userRepository, token.NewManager(cfg.JWT), redisClient, mailpkg.New(cfg.Mail))
 	authHandler := handler.NewAuthHandler(authService)
@@ -119,6 +120,9 @@ func run() error {
 	notificationService := service.NewNotificationService(notificationRepository)
 	notificationHandler := handler.NewNotificationHandler(notificationService, userService)
 	notificationConsumer := service.NewNotificationConsumer(notificationRepository, activityRepository, userRepository, logger)
+	chatService := service.NewChatService(chatRepository, activityRepository, userRepository, fileRepository, fileService)
+	chatHandler := handler.NewChatHandler(chatService, userService)
+	chatMembershipConsumer := service.NewChatMembershipConsumer(chatRepository, activityRepository, userRepository, logger)
 	topics := append(service.RelayTopics(), service.NotificationTopics...)
 	ensureCtx, cancelEnsure := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := kafkaClient.EnsureTopics(ensureCtx, topics...); err != nil {
@@ -127,7 +131,8 @@ func run() error {
 	cancelEnsure()
 	consumerCtx, stopConsumer := context.WithCancel(context.Background())
 	defer stopConsumer()
-	go runNotificationConsumer(consumerCtx, notificationConsumer, kafkaClient, logger)
+	go runConsumer(consumerCtx, "notification", notificationConsumer.HandleEvent, service.NotificationConsumerGroup, service.NotificationTopics, kafkaClient, logger)
+	go runConsumer(consumerCtx, "chat membership", chatMembershipConsumer.HandleEvent, service.ChatMembershipConsumerGroup, service.ChatMembershipTopics, kafkaClient, logger)
 	verificationService, err := service.NewVerificationService(verificationRepository, fileRepository, cfg.Security)
 	if err != nil {
 		return fmt.Errorf("initialize verification service: %w", err)
@@ -152,6 +157,7 @@ func run() error {
 		RegistrationHandler: registrationHandler,
 		CheckInHandler:      checkInHandler,
 		NotificationHandler: notificationHandler,
+		ChatHandler:         chatHandler,
 		Authenticator:       authService,
 		AdminChecker:        authService,
 		Readiness:           readiness,
@@ -231,16 +237,16 @@ func startActivityScheduler(activities *service.ActivityService, registrations *
 	return runner, nil
 }
 
-// runNotificationConsumer keeps the notification consumer alive, restarting it
-// after a failure so a transient broker or database problem only delays
-// delivery instead of stopping the worker permanently.
-func runNotificationConsumer(ctx context.Context, consumer *service.NotificationConsumer, client *kafkapkg.Client, logger *zap.Logger) {
+// runConsumer keeps a Kafka consumer alive, restarting it after a failure so a
+// transient broker or database problem only delays delivery instead of stopping
+// the worker permanently.
+func runConsumer(ctx context.Context, name string, handle func(context.Context, kafkapkg.Record) error, group string, topics []string, client *kafkapkg.Client, logger *zap.Logger) {
 	for {
-		reader, err := client.NewConsumer(service.NotificationConsumerGroup, service.NotificationTopics)
+		reader, err := client.NewConsumer(group, topics)
 		if err != nil {
-			logger.Warn("create notification consumer", zap.Error(err))
-		} else if err := reader.Run(ctx, consumer.HandleEvent); err != nil && ctx.Err() == nil {
-			logger.Warn("notification consumer stopped", zap.Error(err))
+			logger.Warn("create consumer", zap.String("consumer", name), zap.Error(err))
+		} else if err := reader.Run(ctx, handle); err != nil && ctx.Err() == nil {
+			logger.Warn("consumer stopped", zap.String("consumer", name), zap.Error(err))
 		}
 		select {
 		case <-ctx.Done():
