@@ -80,6 +80,7 @@ func TestActivityRoutesAreRegistered(t *testing.T) {
 	registrationService := service.NewRegistrationService(nil, nil, nil, nil, nil, nil, nil)
 	checkInService := service.NewCheckInService(nil, nil, nil, nil)
 	notificationService := service.NewNotificationService(nil)
+	chatService := service.NewChatService(nil, nil, nil, nil, nil)
 	userService := service.NewUserService(nil, nil, nil)
 	engine := New(Dependencies{
 		AuthHandler:         handler.NewAuthHandler(nil),
@@ -90,6 +91,7 @@ func TestActivityRoutesAreRegistered(t *testing.T) {
 		RegistrationHandler: handler.NewRegistrationHandler(registrationService, userService),
 		CheckInHandler:      handler.NewCheckInHandler(checkInService, userService),
 		NotificationHandler: handler.NewNotificationHandler(notificationService, userService),
+		ChatHandler:         handler.NewChatHandler(chatService, userService),
 		Authenticator:       stubAuthenticator{},
 		AdminChecker:        stubAdminChecker{},
 		Readiness:           health.New(time.Second),
@@ -125,6 +127,11 @@ func TestActivityRoutesAreRegistered(t *testing.T) {
 		"GET /api/v1/notifications/unread-count",
 		"POST /api/v1/notifications/read",
 		"POST /api/v1/notifications/read-all",
+		"GET /api/v1/users/me/groups",
+		"GET /api/v1/groups/:id",
+		"GET /api/v1/groups/:id/members",
+		"GET /api/v1/groups/:id/messages",
+		"GET /api/v1/messages/offline",
 		"POST /api/v1/activities/:id/approve",
 		"POST /api/v1/activities/:id/reject",
 		"POST /api/v1/activities/:id/send-back",

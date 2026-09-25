@@ -137,21 +137,51 @@ func (r *ActivityRepository) Update(ctx context.Context, activity *model.Activit
 	})
 }
 
+// ActivityTransitionInput is the atomic unit of work for an activity status
+// change, including the optional activity group side effects.
+type ActivityTransitionInput struct {
+	ActivityID uint64
+	FromStatus uint8
+	Values     map[string]any
+	Log        *model.ActivityStatusLog
+	// Publishing an activity also creates its chat group with the organizer as
+	// owner, in the same transaction.
+	Group      *model.ChatGroup
+	GroupOwner *model.ChatGroupMember
+	// Cancelling an activity dissolves its chat group.
+	DissolveGroup bool
+}
+
 // Transition applies a guarded status change and records the status log in the
 // same transaction. It returns ErrConcurrentUpdate when the row was not in the
 // expected source status.
-func (r *ActivityRepository) Transition(ctx context.Context, activityID uint64, fromStatus uint8, values map[string]any, log *model.ActivityStatusLog) error {
+func (r *ActivityRepository) Transition(ctx context.Context, in ActivityTransitionInput) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&model.Activity{}).
-			Where("id = ? AND status = ?", activityID, fromStatus).
-			Updates(values)
+			Where("id = ? AND status = ?", in.ActivityID, in.FromStatus).
+			Updates(in.Values)
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
 			return ErrConcurrentUpdate
 		}
-		return tx.Create(log).Error
+		if in.Group != nil {
+			if err := createGroupWithOwner(tx, in.Group, in.GroupOwner); err != nil {
+				return err
+			}
+		}
+		if in.DissolveGroup {
+			err := tx.Model(&model.ChatGroup{}).Where("activity_id = ?", in.ActivityID).
+				Updates(map[string]any{"status": model.ChatGroupDissolved, "updated_at": time.Now().UTC()}).Error
+			if err != nil {
+				return err
+			}
+		}
+		if in.Log != nil {
+			return tx.Create(in.Log).Error
+		}
+		return nil
 	})
 }
 
