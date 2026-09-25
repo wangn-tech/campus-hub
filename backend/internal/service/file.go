@@ -12,7 +12,6 @@ import (
 	"github.com/wangn-tech/campus-hub/internal/model"
 	storagepkg "github.com/wangn-tech/campus-hub/internal/platform/storage"
 	"github.com/wangn-tech/campus-hub/internal/repository"
-	"gorm.io/gorm"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -126,5 +125,3 @@ func validExtension(name, expected string) bool {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
 	return ext == expected || (expected == "jpg" && ext == "jpeg")
 }
-
-var _ = gorm.ErrRecordNotFound

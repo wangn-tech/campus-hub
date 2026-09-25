@@ -110,30 +110,29 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("initialize verification service: %w", err)
 	}
-	statusSync := cron.New()
-	if _, err := statusSync.AddFunc("@every 1m", func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		changed, syncErr := activityService.SyncStatuses(ctx)
-		if syncErr != nil {
-			logger.Warn("activity status sync failed", zap.Error(syncErr))
-			return
-		}
-		if changed > 0 {
-			logger.Info("activity status synced", zap.Int64("changed", changed))
-		}
-	}); err != nil {
-		return fmt.Errorf("schedule activity status sync: %w", err)
+	scheduler, err := startActivityScheduler(activityService, logger)
+	if err != nil {
+		return err
 	}
-	statusSync.Start()
-	defer statusSync.Stop()
+	defer scheduler.Stop()
 	readiness := health.New(cfg.Observability.ReadinessTimeout,
 		health.CheckFunc{CheckName: "mysql", Fn: func(ctx context.Context) error { return database.Check(ctx, db) }},
 		health.CheckFunc{CheckName: "redis", Fn: func(ctx context.Context) error { return redispkg.Check(ctx, redisClient) }},
 		health.CheckFunc{CheckName: "kafka", Fn: func(ctx context.Context) error { return kafkapkg.Check(ctx, kafkaClient) }},
 		health.CheckFunc{CheckName: "elasticsearch", Fn: func(ctx context.Context) error { return esClient.Check(ctx) }},
 	)
-	engine := router.New(router.Dependencies{AuthHandler: authHandler, UserHandler: handler.NewUserHandler(userService, fileService), FileHandler: handler.NewFileHandler(fileService, userService), VerificationHandler: handler.NewVerificationHandler(verificationService, userService), ActivityHandler: activityHandler, Authenticator: authService, AdminChecker: authService, Readiness: readiness, Logger: logger, AllowedOrigins: cfg.HTTP.AllowedOrigins})
+	engine := router.New(router.Dependencies{
+		AuthHandler:         authHandler,
+		UserHandler:         handler.NewUserHandler(userService, fileService),
+		FileHandler:         handler.NewFileHandler(fileService, userService),
+		VerificationHandler: handler.NewVerificationHandler(verificationService, userService),
+		ActivityHandler:     activityHandler,
+		Authenticator:       authService,
+		AdminChecker:        authService,
+		Readiness:           readiness,
+		Logger:              logger,
+		AllowedOrigins:      cfg.HTTP.AllowedOrigins,
+	})
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.HTTP.Host, cfg.HTTP.Port),
 		Handler:      engine,
@@ -166,4 +165,26 @@ func run() error {
 	}
 	logger.Info("server stopped")
 	return nil
+}
+
+// startActivityScheduler runs the periodic activity maintenance tasks. Later
+// stages add registration and ticket expiry to the same runner.
+func startActivityScheduler(activities *service.ActivityService, logger *zap.Logger) (*cron.Cron, error) {
+	runner := cron.New()
+	if _, err := runner.AddFunc("@every 1m", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		changed, err := activities.SyncStatuses(ctx)
+		if err != nil {
+			logger.Warn("activity status sync failed", zap.Error(err))
+			return
+		}
+		if changed > 0 {
+			logger.Info("activity status synced", zap.Int64("changed", changed))
+		}
+	}); err != nil {
+		return nil, fmt.Errorf("schedule activity status sync: %w", err)
+	}
+	runner.Start()
+	return runner, nil
 }

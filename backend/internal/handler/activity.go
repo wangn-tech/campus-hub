@@ -124,7 +124,7 @@ func (h *ActivityHandler) Create(c *gin.Context) {
 		userError(c, err)
 		return
 	}
-	activity, err := h.activities.Create(c.Request.Context(), user, in)
+	activity, err := h.activities.Create(c.Request.Context(), user, in, httpx.TraceID(c))
 	if err != nil {
 		activityError(c, err)
 		return
@@ -239,7 +239,7 @@ func activityError(c *gin.Context, e error) {
 	switch {
 	case errors.Is(e, service.ErrActivityNotFound), errors.Is(e, gorm.ErrRecordNotFound):
 		httpx.Error(c, http.StatusNotFound, 102404, "activity not found")
-	case errors.Is(e, service.ErrActivityForbidden):
+	case errors.Is(e, service.ErrForbidden):
 		httpx.Error(c, http.StatusForbidden, 102403, "forbidden")
 	case errors.Is(e, service.ErrActivityInvalid):
 		httpx.Error(c, http.StatusBadRequest, 102400, "invalid activity request")

@@ -14,10 +14,9 @@ import (
 )
 
 var (
-	ErrActivityNotFound  = errors.New("activity not found")
-	ErrActivityForbidden = errors.New("activity forbidden")
-	ErrActivityInvalid   = errors.New("activity invalid input")
-	ErrActivityConflict  = errors.New("activity state conflict")
+	ErrActivityNotFound = errors.New("activity not found")
+	ErrActivityInvalid  = errors.New("activity invalid input")
+	ErrActivityConflict = errors.New("activity state conflict")
 )
 
 const (
@@ -102,55 +101,6 @@ type ActivitySearchQuery struct {
 	PageSize   int
 }
 
-type ActivityView struct {
-	ID                       string            `json:"id"`
-	Title                    string            `json:"title"`
-	CoverURL                 string            `json:"cover_url"`
-	Category                 ActivityCategory  `json:"category"`
-	Tags                     []ActivityTagView `json:"tags"`
-	Organizer                ActivityOrganizer `json:"organizer"`
-	Description              string            `json:"description"`
-	ContactPhone             string            `json:"contact_phone"`
-	RegisterStartAt          timestamp.Millis  `json:"register_start_at"`
-	RegisterEndAt            timestamp.Millis  `json:"register_end_at"`
-	ActivityStartAt          timestamp.Millis  `json:"activity_start_at"`
-	ActivityEndAt            timestamp.Millis  `json:"activity_end_at"`
-	Location                 string            `json:"location"`
-	AddressDetail            string            `json:"address_detail"`
-	Longitude                *float64          `json:"longitude"`
-	Latitude                 *float64          `json:"latitude"`
-	MaxParticipants          uint32            `json:"max_participants"`
-	ApprovedParticipantCount uint32            `json:"approved_participant_count"`
-	PendingParticipantCount  uint32            `json:"pending_participant_count"`
-	RequireApproval          bool              `json:"require_approval"`
-	RequireStudentVerify     bool              `json:"require_student_verify"`
-	MinCreditScore           int               `json:"min_credit_score"`
-	Status                   uint8             `json:"status"`
-	RejectReason             string            `json:"reject_reason"`
-	ViewCount                uint64            `json:"view_count"`
-	Version                  uint32            `json:"version"`
-	CreatedAt                timestamp.Millis  `json:"created_at"`
-	UpdatedAt                timestamp.Millis  `json:"updated_at"`
-}
-
-type ActivityCategory struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-type ActivityTagView struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Color string `json:"color"`
-	Icon  string `json:"icon"`
-}
-
-type ActivityOrganizer struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	AvatarURL string `json:"avatar_url"`
-}
-
 func (s *ActivityService) Categories(ctx context.Context) ([]model.Category, error) {
 	return s.categories.ListActive(ctx)
 }
@@ -163,7 +113,7 @@ func (s *ActivityService) Tags(ctx context.Context, scope string) ([]model.Tag, 
 	return s.tags.ListByScope(ctx, scope)
 }
 
-func (s *ActivityService) Create(ctx context.Context, user *model.User, in ActivityCreateInput) (*model.Activity, error) {
+func (s *ActivityService) Create(ctx context.Context, user *model.User, in ActivityCreateInput, trace string) (*model.Activity, error) {
 	category, tags, cover, err := s.validateForm(ctx, user, in.ActivityForm)
 	if err != nil {
 		return nil, err
@@ -200,7 +150,7 @@ func (s *ActivityService) Create(ctx context.Context, user *model.User, in Activ
 		_ = s.files.AddReference(ctx, cover.ID, activityRefType, activity.ID, activityCoverPurpose)
 	}
 	if !in.IsDraft {
-		if err := s.transition(ctx, activity, uint8(model.ActivityPendingReview), model.ActivityOperatorUser, user.ID, "", ""); err != nil {
+		if err := s.transition(ctx, activity, uint8(model.ActivityPendingReview), model.ActivityOperatorUser, user.ID, "", trace); err != nil {
 			return nil, err
 		}
 		activity.Status = uint8(model.ActivityPendingReview)
@@ -213,7 +163,7 @@ func (s *ActivityService) Update(ctx context.Context, user *model.User, id strin
 	if err != nil {
 		return nil, err
 	}
-	if activity.Status != uint8(model.ActivityDraft) && activity.Status != uint8(model.ActivityRejected) {
+	if !isEditableActivityStatus(activity.Status) {
 		return nil, ErrActivityConflict
 	}
 	category, tags, cover, err := s.validateForm(ctx, user, form)
@@ -249,7 +199,7 @@ func (s *ActivityService) Update(ctx context.Context, user *model.User, id strin
 		_ = s.files.AddReference(ctx, cover.ID, activityRefType, activity.ID, activityCoverPurpose)
 	}
 	var log *model.ActivityStatusLog
-	if activity.Status == uint8(model.ActivityRejected) {
+	if model.ActivityStatus(activity.Status) == model.ActivityRejected {
 		values["status"] = uint8(model.ActivityDraft)
 		values["reject_reason"] = ""
 		log = &model.ActivityStatusLog{
@@ -277,7 +227,7 @@ func (s *ActivityService) Submit(ctx context.Context, user *model.User, id, trac
 	if err != nil {
 		return err
 	}
-	if activity.Status != uint8(model.ActivityDraft) && activity.Status != uint8(model.ActivityRejected) {
+	if !isEditableActivityStatus(activity.Status) {
 		return ErrActivityConflict
 	}
 	return s.transition(ctx, activity, uint8(model.ActivityPendingReview), model.ActivityOperatorUser, user.ID, "", trace)
@@ -288,9 +238,7 @@ func (s *ActivityService) Cancel(ctx context.Context, user *model.User, id, trac
 	if err != nil {
 		return err
 	}
-	switch model.ActivityStatus(activity.Status) {
-	case model.ActivityDraft, model.ActivityPendingReview, model.ActivityPublished, model.ActivityOngoing:
-	default:
+	if !canCancelActivity(activity.Status) {
 		return ErrActivityConflict
 	}
 	return s.transition(ctx, activity, uint8(model.ActivityCancelled), model.ActivityOperatorUser, user.ID, "", trace)
@@ -320,7 +268,7 @@ func (s *ActivityService) review(ctx context.Context, admin *model.User, id stri
 		}
 		return err
 	}
-	if activity.Status != uint8(model.ActivityPendingReview) {
+	if !canReviewActivity(activity.Status) {
 		return ErrActivityConflict
 	}
 	return s.transition(ctx, activity, to, model.ActivityOperatorAdmin, admin.ID, reason, trace)
@@ -433,155 +381,6 @@ func (s *ActivityService) listViews(ctx context.Context, filter repository.Activ
 	return views, total, nil
 }
 
-func (s *ActivityService) buildViews(ctx context.Context, activities []model.Activity) ([]ActivityView, error) {
-	views := make([]ActivityView, 0, len(activities))
-	if len(activities) == 0 {
-		return views, nil
-	}
-	activityIDs := make([]uint64, 0, len(activities))
-	categoryIDs := make([]uint64, 0, len(activities))
-	organizerIDs := make([]uint64, 0, len(activities))
-	fileIDs := make([]uint64, 0, len(activities))
-	for _, activity := range activities {
-		activityIDs = append(activityIDs, activity.ID)
-		categoryIDs = append(categoryIDs, activity.CategoryID)
-		organizerIDs = append(organizerIDs, activity.OrganizerID)
-		if activity.CoverFileID != nil {
-			fileIDs = append(fileIDs, *activity.CoverFileID)
-		}
-	}
-	tagMap, err := s.activities.TagsForActivityIDs(ctx, activityIDs)
-	if err != nil {
-		return nil, err
-	}
-	categories, err := s.categories.FindByIDs(ctx, uniqueUint64(categoryIDs))
-	if err != nil {
-		return nil, err
-	}
-	organizers, err := s.users.FindByIDs(ctx, uniqueUint64(organizerIDs))
-	if err != nil {
-		return nil, err
-	}
-	for _, organizer := range organizers {
-		if organizer.AvatarFileID != nil {
-			fileIDs = append(fileIDs, *organizer.AvatarFileID)
-		}
-	}
-	files, err := s.files.FindByIDs(ctx, uniqueUint64(fileIDs))
-	if err != nil {
-		return nil, err
-	}
-	urls := make(map[uint64]string, len(files))
-	for i := range files {
-		url, err := s.attachments.AccessURL(ctx, &files[i])
-		if err != nil {
-			return nil, err
-		}
-		urls[files[i].ID] = url
-	}
-	categoryByID := make(map[uint64]model.Category, len(categories))
-	for _, category := range categories {
-		categoryByID[category.ID] = category
-	}
-	organizerByID := make(map[uint64]model.User, len(organizers))
-	for _, organizer := range organizers {
-		organizerByID[organizer.ID] = organizer
-	}
-	for _, activity := range activities {
-		view := ActivityView{
-			ID:                       activity.UUID,
-			Title:                    activity.Title,
-			Description:              activity.Description,
-			ContactPhone:             activity.ContactPhone,
-			RegisterStartAt:          timestamp.Millis(activity.RegisterStartAt),
-			RegisterEndAt:            timestamp.Millis(activity.RegisterEndAt),
-			ActivityStartAt:          timestamp.Millis(activity.ActivityStartAt),
-			ActivityEndAt:            timestamp.Millis(activity.ActivityEndAt),
-			Location:                 activity.Location,
-			AddressDetail:            activity.AddressDetail,
-			Longitude:                activity.Longitude,
-			Latitude:                 activity.Latitude,
-			MaxParticipants:          activity.MaxParticipants,
-			ApprovedParticipantCount: activity.ApprovedParticipantCount,
-			PendingParticipantCount:  activity.PendingParticipantCount,
-			RequireApproval:          activity.RequireApproval,
-			RequireStudentVerify:     activity.RequireStudentVerify,
-			MinCreditScore:           activity.MinCreditScore,
-			Status:                   activity.Status,
-			RejectReason:             activity.RejectReason,
-			ViewCount:                activity.ViewCount,
-			Version:                  activity.Version,
-			CreatedAt:                timestamp.Millis(activity.CreatedAt),
-			UpdatedAt:                timestamp.Millis(activity.UpdatedAt),
-		}
-		if activity.CoverFileID != nil {
-			view.CoverURL = urls[*activity.CoverFileID]
-		}
-		if category, ok := categoryByID[activity.CategoryID]; ok {
-			view.Category = ActivityCategory{ID: category.UUID, Name: category.Name}
-		}
-		if organizer, ok := organizerByID[activity.OrganizerID]; ok {
-			view.Organizer = ActivityOrganizer{ID: organizer.UUID, Name: organizer.Nickname}
-			if organizer.AvatarFileID != nil {
-				view.Organizer.AvatarURL = urls[*organizer.AvatarFileID]
-			}
-		} else {
-			view.Organizer = ActivityOrganizer{Name: activity.OrganizerName}
-		}
-		for _, tag := range tagMap[activity.ID] {
-			view.Tags = append(view.Tags, ActivityTagView{ID: tag.UUID, Name: tag.Name, Color: tag.Color, Icon: tag.Icon})
-		}
-		views = append(views, view)
-	}
-	return views, nil
-}
-
-func (s *ActivityService) validateForm(ctx context.Context, user *model.User, form ActivityForm) (*model.Category, []model.Tag, *model.File, error) {
-	title := strings.TrimSpace(form.Title)
-	if len([]rune(title)) < 1 || len([]rune(title)) > activityMaxTitleLen {
-		return nil, nil, nil, ErrActivityInvalid
-	}
-	location := strings.TrimSpace(form.Location)
-	if len([]rune(location)) < 1 || len([]rune(location)) > activityMaxLocLen {
-		return nil, nil, nil, ErrActivityInvalid
-	}
-	if len([]rune(form.Description)) > activityMaxDescLen ||
-		len([]rune(form.AddressDetail)) > activityMaxAddrLen ||
-		len([]rune(strings.TrimSpace(form.ContactPhone))) > activityMaxPhoneLen {
-		return nil, nil, nil, ErrActivityInvalid
-	}
-	if form.MaxParticipants < 1 || form.MinCreditScore < 0 {
-		return nil, nil, nil, ErrActivityInvalid
-	}
-	if !validCoordinate(form.Longitude, 180) || !validCoordinate(form.Latitude, 90) {
-		return nil, nil, nil, ErrActivityInvalid
-	}
-	if !validActivityWindow(form.RegisterStartAt.Time(), form.RegisterEndAt.Time(), form.ActivityStartAt.Time(), form.ActivityEndAt.Time()) {
-		return nil, nil, nil, ErrActivityInvalid
-	}
-	category, err := s.categories.FindByUUID(ctx, strings.TrimSpace(form.CategoryID))
-	if err != nil || category.Status != 1 {
-		return nil, nil, nil, ErrActivityInvalid
-	}
-	tagUUIDs := uniqueStrings(form.TagIDs)
-	tags, err := s.tags.FindByUUIDsForScope(ctx, tagUUIDs, "activity")
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if len(tags) != len(tagUUIDs) {
-		return nil, nil, nil, ErrActivityInvalid
-	}
-	var cover *model.File
-	if strings.TrimSpace(form.CoverFileID) != "" {
-		file, err := s.files.FindByUUID(ctx, strings.TrimSpace(form.CoverFileID))
-		if err != nil || file.UploaderID != user.ID || file.BizType != activityCoverBizType {
-			return nil, nil, nil, ErrActivityInvalid
-		}
-		cover = file
-	}
-	return category, tags, cover, nil
-}
-
 func (s *ActivityService) findOwned(ctx context.Context, user *model.User, id string) (*model.Activity, error) {
 	activity, err := s.activities.FindByUUID(ctx, strings.TrimSpace(id))
 	if err != nil {
@@ -591,7 +390,7 @@ func (s *ActivityService) findOwned(ctx context.Context, user *model.User, id st
 		return nil, err
 	}
 	if activity.OrganizerID != user.ID {
-		return nil, ErrActivityForbidden
+		return nil, ErrForbidden
 	}
 	return activity, nil
 }
@@ -650,6 +449,28 @@ func (s *ActivityService) canViewPrivate(ctx context.Context, activity *model.Ac
 	return s.users.HasRole(ctx, viewer.ID, model.RoleAdmin)
 }
 
+// isEditableActivityStatus reports whether the organizer may still edit the
+// activity. Rejected activities return to draft when edited.
+func isEditableActivityStatus(status uint8) bool {
+	return status == uint8(model.ActivityDraft) || status == uint8(model.ActivityRejected)
+}
+
+// canCancelActivity reports whether the organizer may cancel the activity.
+func canCancelActivity(status uint8) bool {
+	switch model.ActivityStatus(status) {
+	case model.ActivityDraft, model.ActivityPendingReview, model.ActivityPublished, model.ActivityOngoing:
+		return true
+	default:
+		return false
+	}
+}
+
+// canReviewActivity reports whether an administrator may approve, reject or
+// send back the activity.
+func canReviewActivity(status uint8) bool {
+	return status == uint8(model.ActivityPendingReview)
+}
+
 func isPublicActivityStatus(status uint8) bool {
 	for _, allowed := range publicActivityStatuses {
 		if int(status) == allowed {
@@ -685,23 +506,6 @@ func NormalizePage(page, pageSize int) (int, int) {
 		pageSize = activityMaxPageSize
 	}
 	return page, pageSize
-}
-
-func validCoordinate(value *float64, limit float64) bool {
-	if value == nil {
-		return true
-	}
-	return *value >= -limit && *value <= limit
-}
-
-// validActivityWindow enforces that the registration window is non-empty,
-// closes no later than the activity starts, and that the activity window is
-// non-empty.
-func validActivityWindow(registerStart, registerEnd, activityStart, activityEnd time.Time) bool {
-	if registerStart.IsZero() || registerEnd.IsZero() || activityStart.IsZero() || activityEnd.IsZero() {
-		return false
-	}
-	return registerStart.Before(registerEnd) && activityStart.Before(activityEnd) && !registerEnd.After(activityStart)
 }
 
 func tagIDList(tags []model.Tag) []uint64 {
