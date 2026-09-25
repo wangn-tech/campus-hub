@@ -55,6 +55,20 @@ wait_for_status() {
   return 1
 }
 
+# create_published_activity creates an activity whose registration window is
+# open and approves it, so it can be registered for. Prints the activity id.
+create_published_activity() {
+  local require_approval="$1" title="$2" payload id
+  payload="$(printf '{"title":"%s","description":"created by ci","category_id":"%s","contact_phone":"13800000000","register_start_at":%s,"register_end_at":%s,"activity_start_at":%s,"activity_end_at":%s,"location":"CI Hall","address_detail":"integration","max_participants":30,"require_approval":%s,"require_student_verify":false,"min_credit_score":0,"tag_ids":["%s"],"is_draft":false}' \
+    "${title}" "${category_id}" "$(( now_ms - hour_ms ))" "$(( now_ms + hour_ms ))" "$(( now_ms + 2 * hour_ms ))" "$(( now_ms + 3 * hour_ms ))" "${require_approval}" "${tag_id}")"
+  curl --silent --show-error --output "${temporary_dir}/helper-activity.json" --request POST "http://127.0.0.1:${integration_port}/api/v1/activities" --header "Authorization: Bearer ${access_token}" --header 'Content-Type: application/json' --data "${payload}"
+  id="$(sed -n 's/.*"data":{"id":"\([^"]*\)".*/\1/p' "${temporary_dir}/helper-activity.json")"
+  [[ -n "${id}" ]]
+  curl --silent --show-error --output /dev/null --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${id}/submit" --header "Authorization: Bearer ${access_token}"
+  curl --silent --show-error --output /dev/null --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${id}/approve" --header "Authorization: Bearer ${access_token}"
+  printf '%s' "${id}"
+}
+
 echo "Starting Compose dependencies"
 # Start the whole stack without waiting so image pulls and the slow
 # Elasticsearch boot overlap with the flows below. Only MySQL, Redis, RustFS and
@@ -134,6 +148,29 @@ cancel_status="$(curl --silent --show-error --output "${temporary_dir}/activity-
 [[ "${cancel_status}" == "200" ]]
 status_log_count="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM activity_status_logs WHERE activity_id = (SELECT id FROM activities WHERE uuid = '${activity_id}')" 2>/dev/null | tr -d '[:space:]')"
 [[ "${status_log_count}" -ge 3 ]]
+
+echo "Verifying registration lifecycle"
+register_activity="$(create_published_activity false "integration register activity")"
+register_status="$(curl --silent --show-error --output "${temporary_dir}/registration.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${register_activity}/registrations" --header "Authorization: Bearer ${access_token}")"
+[[ "${register_status}" == "200" ]]
+registration_id="$(sed -n 's/.*"data":{"id":"\([^"]*\)".*/\1/p' "${temporary_dir}/registration.json")"
+ticket_id="$(sed -n 's/.*"ticket":{"id":"\([^"]*\)".*/\1/p' "${temporary_dir}/registration.json")"
+[[ -n "${registration_id}" && -n "${ticket_id}" ]]
+grep -q '"status":1' "${temporary_dir}/registration.json"
+duplicate_status="$(curl --silent --show-error --output "${temporary_dir}/registration-duplicate.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/activities/${register_activity}/registrations" --header "Authorization: Bearer ${access_token}")"
+[[ "${duplicate_status}" == "409" ]]
+my_registrations="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/users/me/activities/registered?page=1&page_size=50" --header "Authorization: Bearer ${access_token}")"
+grep -q "${registration_id}" <<<"${my_registrations}"
+my_tickets="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/tickets?page=1&page_size=50" --header "Authorization: Bearer ${access_token}")"
+grep -q "${ticket_id}" <<<"${my_tickets}"
+cancel_registration_status="$(curl --silent --show-error --output "${temporary_dir}/registration-cancelled.json" --write-out '%{http_code}' --request DELETE "http://127.0.0.1:${integration_port}/api/v1/registrations/${registration_id}" --header "Authorization: Bearer ${access_token}")"
+[[ "${cancel_registration_status}" == "200" ]]
+ticket_detail="$(curl --silent --show-error "http://127.0.0.1:${integration_port}/api/v1/tickets/${ticket_id}" --header "Authorization: Bearer ${access_token}")"
+grep -q '"status":3' <<<"${ticket_detail}"
+registration_log_count="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM registration_status_logs WHERE registration_id = (SELECT id FROM activity_registrations WHERE uuid = '${registration_id}')" 2>/dev/null | tr -d '[:space:]')"
+[[ "${registration_log_count}" -ge 1 ]]
+registration_event_count="$("${compose[@]}" exec -T mysql mysql --user="${mysql_user}" --password="${mysql_password}" "${mysql_database}" --batch --skip-column-names -e "SELECT COUNT(*) FROM outbox_events WHERE event_type IN ('registration.created','ticket.created','registration.cancelled','ticket.voided')" 2>/dev/null | tr -d '[:space:]')"
+[[ "${registration_event_count}" -ge 4 ]]
 
 echo "Waiting for Kafka and Elasticsearch readiness"
 "${compose[@]}" up --detach --wait --wait-timeout 180 kafka elasticsearch
