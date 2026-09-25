@@ -45,9 +45,23 @@ elasticsearch:
   enable_search: true
   request_timeout: 10s
 storage:
-  driver: local
+  driver: rustfs
+  endpoint: 127.0.0.1:19000
+  access_key: rustfsadmin
+  secret_key: change-me
   bucket: campushub-test
   use_path_style: true
+  use_ssl: false
+  presign_ttl: 15m
+  max_image_size: 5242880
+mail:
+  host: 127.0.0.1
+  port: 1025
+  from: noreply@campushub.local
+  tls_mode: none
+security:
+  pii_encryption_key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+  pii_hash_key: campushub-test-pii-hash-key
 jwt:
   issuer: campushub-test
   access_secret: test-access-secret

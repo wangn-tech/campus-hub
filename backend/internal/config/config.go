@@ -17,6 +17,8 @@ type Config struct {
 	Kafka         KafkaConfig         `mapstructure:"kafka"`
 	Elasticsearch ElasticsearchConfig `mapstructure:"elasticsearch"`
 	Storage       StorageConfig       `mapstructure:"storage"`
+	Mail          MailConfig          `mapstructure:"mail"`
+	Security      SecurityConfig      `mapstructure:"security"`
 	JWT           JWTConfig           `mapstructure:"jwt"`
 	Log           LogConfig           `mapstructure:"log"`
 	Observability ObservabilityConfig `mapstructure:"observability"`
@@ -65,12 +67,29 @@ type RedisConfig struct {
 }
 
 type StorageConfig struct {
-	Driver       string `mapstructure:"driver"`
-	Endpoint     string `mapstructure:"endpoint"`
-	AccessKey    string `mapstructure:"access_key"`
-	SecretKey    string `mapstructure:"secret_key"`
-	Bucket       string `mapstructure:"bucket"`
-	UsePathStyle bool   `mapstructure:"use_path_style"`
+	Driver       string        `mapstructure:"driver"`
+	Endpoint     string        `mapstructure:"endpoint"`
+	AccessKey    string        `mapstructure:"access_key"`
+	SecretKey    string        `mapstructure:"secret_key"`
+	Bucket       string        `mapstructure:"bucket"`
+	UsePathStyle bool          `mapstructure:"use_path_style"`
+	UseSSL       bool          `mapstructure:"use_ssl"`
+	PresignTTL   time.Duration `mapstructure:"presign_ttl"`
+	MaxImageSize int64         `mapstructure:"max_image_size"`
+}
+
+type MailConfig struct {
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	From     string `mapstructure:"from"`
+	TLSMode  string `mapstructure:"tls_mode"`
+}
+
+type SecurityConfig struct {
+	PIIEncryptionKey string `mapstructure:"pii_encryption_key"`
+	PIIHashKey       string `mapstructure:"pii_hash_key"`
 }
 
 type KafkaConfig struct {
@@ -161,10 +180,20 @@ func Load(path string) (Config, error) {
 	v.SetDefault("elasticsearch.index_prefix", "campushub")
 	v.SetDefault("elasticsearch.enable_search", true)
 	v.SetDefault("elasticsearch.request_timeout", "10s")
-	v.SetDefault("storage.driver", "local")
-	v.SetDefault("storage.endpoint", "")
+	v.SetDefault("storage.driver", "rustfs")
+	v.SetDefault("storage.endpoint", "127.0.0.1:19000")
+	v.SetDefault("storage.access_key", "rustfsadmin")
+	v.SetDefault("storage.secret_key", "change-me")
 	v.SetDefault("storage.bucket", "campushub")
 	v.SetDefault("storage.use_path_style", true)
+	v.SetDefault("storage.presign_ttl", "15m")
+	v.SetDefault("storage.max_image_size", 5242880)
+	v.SetDefault("mail.host", "127.0.0.1")
+	v.SetDefault("mail.port", 1025)
+	v.SetDefault("mail.from", "noreply@campushub.local")
+	v.SetDefault("mail.tls_mode", "none")
+	v.SetDefault("security.pii_encryption_key", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	v.SetDefault("security.pii_hash_key", "campushub-dev-pii-hash-key")
 	v.SetDefault("jwt.issuer", "campushub")
 	v.SetDefault("jwt.access_ttl", "2h")
 	v.SetDefault("jwt.refresh_ttl", "720h")
@@ -233,8 +262,14 @@ func (c Config) Validate() error {
 	if c.JWT.AccessTTL <= 0 || c.JWT.RefreshTTL <= 0 {
 		return fmt.Errorf("jwt token ttl must be positive")
 	}
-	if c.Storage.Driver != "local" && c.Storage.Driver != "minio" {
-		return fmt.Errorf("storage.driver must be local or minio")
+	if c.Storage.Driver != "rustfs" || c.Storage.Endpoint == "" || c.Storage.AccessKey == "" || c.Storage.SecretKey == "" || c.Storage.Bucket == "" || c.Storage.PresignTTL <= 0 || c.Storage.MaxImageSize <= 0 {
+		return fmt.Errorf("valid rustfs storage configuration is required")
+	}
+	if c.Mail.Host == "" || c.Mail.Port < 1 || c.Mail.Port > 65535 || c.Mail.From == "" || (c.Mail.TLSMode != "none" && c.Mail.TLSMode != "starttls") {
+		return fmt.Errorf("mail configuration is invalid")
+	}
+	if c.Security.PIIEncryptionKey == "" || c.Security.PIIHashKey == "" {
+		return fmt.Errorf("security pii keys are required")
 	}
 	if c.Log.Level != "debug" && c.Log.Level != "info" && c.Log.Level != "warn" && c.Log.Level != "error" {
 		return fmt.Errorf("log.level is invalid")
@@ -248,6 +283,9 @@ func (c Config) Validate() error {
 	if c.App.Env == "prod" {
 		if insecureSecret(c.JWT.AccessSecret) || insecureSecret(c.JWT.RefreshSecret) {
 			return fmt.Errorf("non-default jwt secrets are required in prod")
+		}
+		if insecureSecret(c.Storage.SecretKey) || c.Mail.TLSMode != "starttls" || strings.HasPrefix(c.Security.PIIEncryptionKey, "MDEy") || strings.HasPrefix(c.Security.PIIHashKey, "campushub-dev-") {
+			return fmt.Errorf("production storage, mail TLS, and pii keys must be secure")
 		}
 		for _, origin := range c.HTTP.AllowedOrigins {
 			if strings.TrimSpace(origin) == "*" {

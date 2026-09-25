@@ -8,14 +8,19 @@ import (
 	"github.com/wangn-tech/campus-hub/internal/health"
 	"github.com/wangn-tech/campus-hub/internal/httpx"
 	"github.com/wangn-tech/campus-hub/internal/middleware"
+	"github.com/wangn-tech/campus-hub/internal/service"
 	"go.uber.org/zap"
 )
 
 type Dependencies struct {
-	AuthHandler    *handler.AuthHandler
-	Readiness      *health.Service
-	Logger         *zap.Logger
-	AllowedOrigins []string
+	AuthHandler         *handler.AuthHandler
+	UserHandler         *handler.UserHandler
+	FileHandler         *handler.FileHandler
+	VerificationHandler *handler.VerificationHandler
+	AuthService         *service.AuthService
+	Readiness           *health.Service
+	Logger              *zap.Logger
+	AllowedOrigins      []string
 }
 
 func New(dependencies Dependencies) *gin.Engine {
@@ -41,5 +46,29 @@ func New(dependencies Dependencies) *gin.Engine {
 	auth := r.Group("/api/v1/auth")
 	auth.POST("/register", dependencies.AuthHandler.Register)
 	auth.POST("/login", dependencies.AuthHandler.Login)
+	auth.POST("/refresh", dependencies.AuthHandler.Refresh)
+	auth.POST("/password/reset", dependencies.AuthHandler.ResetPassword)
+	r.POST("/api/v1/email-codes", dependencies.AuthHandler.EmailCode)
+	if dependencies.UserHandler != nil {
+		r.GET("/api/v1/tags", dependencies.UserHandler.Tags)
+	}
+	if dependencies.AuthService == nil || dependencies.UserHandler == nil || dependencies.FileHandler == nil || dependencies.VerificationHandler == nil {
+		return r
+	}
+	protected := r.Group("/api/v1")
+	protected.Use(middleware.Auth(dependencies.AuthService))
+	protected.POST("/auth/logout", dependencies.AuthHandler.Logout)
+	protected.POST("/auth/logoff", dependencies.AuthHandler.Logoff)
+	protected.PUT("/users/me/password", dependencies.AuthHandler.ChangePassword)
+	protected.GET("/users/me", dependencies.UserHandler.Me)
+	protected.PUT("/users/me", dependencies.UserHandler.Update)
+	protected.PUT("/users/me/interests", dependencies.UserHandler.Interests)
+	protected.POST("/files/images", dependencies.FileHandler.Upload)
+	protected.GET("/files/:id", dependencies.FileHandler.Get)
+	protected.DELETE("/files/:id", dependencies.FileHandler.Delete)
+	protected.GET("/student-verifications/current", dependencies.VerificationHandler.Current)
+	protected.POST("/student-verifications", dependencies.VerificationHandler.Submit)
+	protected.POST("/student-verifications/:id/confirm", dependencies.VerificationHandler.Confirm)
+	protected.POST("/student-verifications/:id/cancel", dependencies.VerificationHandler.Cancel)
 	return r
 }

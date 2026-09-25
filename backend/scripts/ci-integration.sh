@@ -53,7 +53,7 @@ wait_for_status() {
 }
 
 echo "Starting Compose dependencies"
-"${compose[@]}" up --detach --wait --wait-timeout 180 mysql redis kafka elasticsearch
+"${compose[@]}" up --detach --wait --wait-timeout 180 mysql redis kafka elasticsearch rustfs mailpit
 echo "Applying migrations"
 go run ./cmd/migrate -direction up
 echo "Building and starting backend"
@@ -66,11 +66,35 @@ wait_for_status 200 /ready
 
 echo "Verifying registration and login"
 email="integration-$(date +%s%N)@example.com"
-register_status="$(curl --silent --show-error --output "${temporary_dir}/register.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/auth/register" --header 'Content-Type: application/json' --data "{\"email\":\"${email}\",\"password\":\"integration-password\",\"nickname\":\"integration\"}")"
+email_code_status="$(curl --silent --show-error --output "${temporary_dir}/email-code.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/email-codes" --header 'Content-Type: application/json' --data "{\"email\":\"${email}\",\"scene\":\"register\"}")"
+[[ "${email_code_status}" == "200" ]]
+for _ in $(seq 1 30); do
+  curl --silent "http://127.0.0.1:18025/api/v1/messages" >"${temporary_dir}/mailpit.json" || true
+  code="$(grep -Eo '[0-9]{6}' "${temporary_dir}/mailpit.json" | tail -n 1 || true)"
+  [[ -n "${code}" ]] && break
+  sleep 1
+done
+[[ -n "${code:-}" ]]
+register_status="$(curl --silent --show-error --output "${temporary_dir}/register.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/auth/register" --header 'Content-Type: application/json' --data "{\"email\":\"${email}\",\"password\":\"integration-password\",\"nickname\":\"integration\",\"code\":\"${code}\"}")"
 [[ "${register_status}" == "200" ]]
 login_status="$(curl --silent --show-error --output "${temporary_dir}/login.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/auth/login" --header 'Content-Type: application/json' --data "{\"email\":\"${email}\",\"password\":\"integration-password\"}")"
 [[ "${login_status}" == "200" ]]
 grep -q 'access_token' "${temporary_dir}/login.json"
+access_token="$(sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p' "${temporary_dir}/login.json")"
+[[ -n "${access_token}" ]]
+
+echo "Verifying private RustFS upload and recovery"
+printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' | base64 --decode >"${temporary_dir}/image.png"
+upload_status="$(curl --silent --show-error --output "${temporary_dir}/upload.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/files/images" --header "Authorization: Bearer ${access_token}" --form "file=@${temporary_dir}/image.png;type=image/png" --form 'biz_type=avatar')"
+[[ "${upload_status}" == "200" ]]
+grep -q 'access_url' "${temporary_dir}/upload.json"
+"${compose[@]}" stop rustfs
+upload_down_status="$(curl --silent --show-error --output "${temporary_dir}/upload-down.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/files/images" --header "Authorization: Bearer ${access_token}" --form "file=@${temporary_dir}/image.png;type=image/png" --form 'biz_type=avatar' || true)"
+[[ "${upload_down_status}" == "503" ]]
+"${compose[@]}" start rustfs
+"${compose[@]}" up --detach --wait --wait-timeout 60 rustfs
+upload_recovered_status="$(curl --silent --show-error --output "${temporary_dir}/upload-recovered.json" --write-out '%{http_code}' --request POST "http://127.0.0.1:${integration_port}/api/v1/files/images" --header "Authorization: Bearer ${access_token}" --form "file=@${temporary_dir}/image.png;type=image/png" --form 'biz_type=avatar')"
+[[ "${upload_recovered_status}" == "200" ]]
 
 echo "Verifying Redis readiness recovery"
 "${compose[@]}" stop redis

@@ -30,8 +30,13 @@ jobs:
           go-version-file: backend/go.mod
           cache: true
           cache-dependency-path: backend/go.sum
-      - name: Check formatting
+      - name: Check Go formatting
         run: test -z "$(gofmt -l .)"
+      - name: Check shell script syntax
+        run: |
+          for script in scripts/*.sh; do
+            bash -n "${script}"
+          done
       - name: Check module metadata
         run: go mod tidy && git diff --exit-code -- go.mod go.sum
       - name: Vet
@@ -42,6 +47,11 @@ jobs:
         run: go build ./cmd/server ./cmd/migrate
       - name: Validate Compose configuration
         run: docker compose -f deploy/docker/docker-compose.yml --env-file .env.example config --quiet
+      - name: Verify storage backend wiring
+        run: |
+          resolved="$(docker compose -f deploy/docker/docker-compose.yml --env-file .env.example --profile app config)"
+          echo "${resolved}" | grep -qE '^  rustfs:$'
+          echo "${resolved}" | grep -q 'CAMPUSHUB_STORAGE_DRIVER: rustfs'
 
   integration:
     needs: quality

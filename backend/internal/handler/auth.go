@@ -2,48 +2,154 @@ package handler
 
 import (
 	"errors"
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 	"github.com/wangn-tech/campus-hub/internal/httpx"
+	"github.com/wangn-tech/campus-hub/internal/middleware"
+	"github.com/wangn-tech/campus-hub/internal/model"
 	"github.com/wangn-tech/campus-hub/internal/service"
-	"gorm.io/gorm"
+	"net/http"
 )
 
 type AuthHandler struct{ service *service.AuthService }
 
-func NewAuthHandler(authService *service.AuthService) *AuthHandler {
-	return &AuthHandler{service: authService}
-}
-
+func NewAuthHandler(s *service.AuthService) *AuthHandler { return &AuthHandler{service: s} }
 func (h *AuthHandler) Register(c *gin.Context) {
-	var input service.RegisterInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		httpx.Error(c, http.StatusBadRequest, 100400, "invalid request body")
+	var in service.RegisterInput
+	if c.ShouldBindJSON(&in) != nil {
+		bad(c)
 		return
 	}
-	user, err := h.service.Register(c.Request.Context(), input)
-	if err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) {
-			httpx.Error(c, http.StatusConflict, 101409, "email already registered")
-			return
-		}
-		httpx.Error(c, http.StatusBadRequest, 100400, "invalid registration")
+	u, e := h.service.Register(c.Request.Context(), in)
+	if e != nil {
+		authError(c, e)
 		return
 	}
-	httpx.Success(c, gin.H{"id": user.UUID, "email": user.Email, "nickname": user.Nickname})
+	httpx.Success(c, gin.H{"id": u.UUID, "email": u.Email, "nickname": u.Nickname})
 }
-
 func (h *AuthHandler) Login(c *gin.Context) {
-	var input service.LoginInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		httpx.Error(c, http.StatusBadRequest, 100400, "invalid request body")
+	var in service.LoginInput
+	if c.ShouldBindJSON(&in) != nil {
+		bad(c)
 		return
 	}
-	user, tokens, err := h.service.Login(c.Request.Context(), input)
-	if err != nil {
+	u, t, e := h.service.Login(c.Request.Context(), in)
+	if e != nil {
+		authError(c, e)
+		return
+	}
+	httpx.Success(c, gin.H{"user": gin.H{"id": u.UUID, "email": u.Email, "nickname": u.Nickname}, "tokens": t})
+}
+func (h *AuthHandler) EmailCode(c *gin.Context) {
+	var in struct {
+		Email string `json:"email"`
+		Scene string `json:"scene"`
+	}
+	if c.ShouldBindJSON(&in) != nil {
+		bad(c)
+		return
+	}
+	if e := h.service.SendEmailCode(c.Request.Context(), in.Email, in.Scene); e != nil {
+		authError(c, e)
+		return
+	}
+	httpx.Success(c, gin.H{"status": "sent"})
+}
+func (h *AuthHandler) Refresh(c *gin.Context) {
+	var in service.RefreshInput
+	if c.ShouldBindJSON(&in) != nil {
+		bad(c)
+		return
+	}
+	t, e := h.service.Refresh(c.Request.Context(), in.RefreshToken)
+	if e != nil {
+		authError(c, e)
+		return
+	}
+	httpx.Success(c, gin.H{"tokens": t})
+}
+func (h *AuthHandler) Logout(c *gin.Context) {
+	raw, ok := middleware.BearerToken(c)
+	if !ok {
+		authError(c, service.ErrInvalidCredentials)
+		return
+	}
+	if e := h.service.Logout(c.Request.Context(), raw); e != nil {
+		authError(c, e)
+		return
+	}
+	httpx.Success(c, gin.H{"status": "logged_out"})
+}
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	var in struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if c.ShouldBindJSON(&in) != nil {
+		bad(c)
+		return
+	}
+	u := c.MustGet(middleware.UserUUIDKey).(string)
+	user, e := h.user(c, u)
+	if e == nil {
+		e = h.service.ChangePassword(c.Request.Context(), user, in.OldPassword, in.NewPassword)
+	}
+	if e != nil {
+		authError(c, e)
+		return
+	}
+	httpx.Success(c, gin.H{"status": "password_changed"})
+}
+func (h *AuthHandler) ResetPassword(c *gin.Context) {
+	var in struct {
+		Email       string `json:"email"`
+		Code        string `json:"code"`
+		NewPassword string `json:"new_password"`
+	}
+	if c.ShouldBindJSON(&in) != nil {
+		bad(c)
+		return
+	}
+	if e := h.service.ResetPassword(c.Request.Context(), in.Email, in.Code, in.NewPassword); e != nil {
+		authError(c, e)
+		return
+	}
+	httpx.Success(c, gin.H{"status": "password_reset"})
+}
+func (h *AuthHandler) Logoff(c *gin.Context) {
+	var in struct {
+		Password string `json:"password"`
+		Code     string `json:"code"`
+	}
+	if c.ShouldBindJSON(&in) != nil {
+		bad(c)
+		return
+	}
+	id := c.MustGet(middleware.UserUUIDKey).(string)
+	u, e := h.user(c, id)
+	if e == nil {
+		e = h.service.Logoff(c.Request.Context(), u, in.Password, in.Code)
+	}
+	if e != nil {
+		authError(c, e)
+		return
+	}
+	httpx.Success(c, gin.H{"status": "logged_off"})
+}
+func (h *AuthHandler) user(c *gin.Context, id string) (*model.User, error) {
+	return h.service.Current(c.Request.Context(), id)
+}
+func bad(c *gin.Context) { httpx.Error(c, http.StatusBadRequest, 100400, "invalid request body") }
+func authError(c *gin.Context, e error) {
+	switch {
+	case errors.Is(e, service.ErrRateLimited):
+		httpx.Error(c, http.StatusTooManyRequests, 101429, "too many requests")
+	case errors.Is(e, service.ErrEmailInUse):
+		httpx.Error(c, http.StatusConflict, 101409, "email already registered")
+	case errors.Is(e, service.ErrInvalidCode):
+		httpx.Error(c, http.StatusBadRequest, 101400, "invalid email code")
+	case errors.Is(e, service.ErrInvalidCredentials):
 		httpx.Error(c, http.StatusUnauthorized, 101401, "invalid credentials")
-		return
+	default:
+		httpx.Error(c, http.StatusServiceUnavailable, 101503, "authentication unavailable")
 	}
-	httpx.Success(c, gin.H{"user": gin.H{"id": user.UUID, "email": user.Email, "nickname": user.Nickname}, "tokens": tokens})
 }

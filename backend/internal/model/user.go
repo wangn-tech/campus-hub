@@ -8,6 +8,7 @@ type User struct {
 	Email        string     `gorm:"size:100;uniqueIndex;not null"`
 	PasswordHash string     `gorm:"size:255;not null"`
 	Nickname     string     `gorm:"size:50;not null"`
+	AvatarFileID *uint64    `gorm:"index"`
 	AvatarURL    string     `gorm:"size:500;not null;default:''"`
 	Introduction string     `gorm:"size:500;not null;default:''"`
 	Gender       uint8      `gorm:"not null;default:0"`
@@ -31,3 +32,72 @@ type Role struct {
 }
 
 func (Role) TableName() string { return "roles" }
+
+type Tag struct {
+	ID     uint64 `gorm:"primaryKey"`
+	UUID   string `gorm:"type:char(36);uniqueIndex;not null"`
+	Name   string `gorm:"size:50;not null"`
+	Slug   string `gorm:"size:80;not null"`
+	Status uint8
+}
+
+func (Tag) TableName() string { return "tags" }
+
+type File struct {
+	ID            uint64 `gorm:"primaryKey"`
+	UUID          string `gorm:"type:char(36);uniqueIndex;not null"`
+	StorageDriver string
+	Bucket        string
+	ObjectKey     string
+	URL           string
+	OriginName    string
+	BizType       string
+	FileSize      uint64
+	MIMEType      string
+	Extension     string
+	SHA256        string
+	UploaderID    uint64
+	Status        uint8
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     *time.Time
+}
+
+func (File) TableName() string { return "files" }
+
+type StudentVerification struct {
+	ID                 uint64 `gorm:"primaryKey"`
+	UUID               string `gorm:"type:char(36);uniqueIndex;not null"`
+	UserID             uint64 `gorm:"uniqueIndex;not null"`
+	Status             uint8
+	RealNameEncrypted  string
+	SchoolName         string
+	StudentIDEncrypted string
+	StudentIDHash      string
+	Department         string
+	AdmissionYear      string
+	FrontFileID        *uint64
+	BackFileID         *uint64
+	SubmittedAt        *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+func (StudentVerification) TableName() string { return "student_verifications" }
+
+type StudentVerificationEvent struct {
+	ID             uint64 `gorm:"primaryKey"`
+	UUID           string `gorm:"type:char(36);uniqueIndex;not null"`
+	VerificationID uint64
+	UserID         uint64
+	FromStatus     uint8
+	ToStatus       uint8
+	EventType      string
+	OperatorID     uint64
+	OperatorType   uint8
+	Reason         string
+	TraceID        string
+	CreatedAt      time.Time
+}
+
+func (StudentVerificationEvent) TableName() string { return "student_verification_events" }

@@ -33,9 +33,13 @@ const (
 type StudentVerificationStatus uint8
 
 const (
-	VerificationPending StudentVerificationStatus = iota
+	VerificationInitialized StudentVerificationStatus = iota
+	VerificationOCRProcessing
+	VerificationPendingConfirm
+	VerificationManualReview
 	VerificationApproved
 	VerificationRejected
-	VerificationCancelled
 	VerificationExpired
+	VerificationCancelled
+	VerificationOCRFailed
 )

@@ -45,12 +45,25 @@ elasticsearch:
   enable_search: true
   request_timeout: 10s
 storage:
-  driver: minio
-  endpoint: minio:9000
+  driver: rustfs
+  endpoint: rustfs:9000
   access_key: ""
   secret_key: ""
   bucket: campushub
   use_path_style: true
+  use_ssl: true
+  presign_ttl: 15m
+  max_image_size: 5242880
+mail:
+  host: ""
+  port: 587
+  username: ""
+  password: ""
+  from: ""
+  tls_mode: starttls
+security:
+  pii_encryption_key: ""
+  pii_hash_key: ""
 jwt:
   issuer: campushub
   access_secret: ""
