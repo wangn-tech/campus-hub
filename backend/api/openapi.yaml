@@ -1,0 +1,73 @@
+openapi: 3.0.3
+info:
+  title: CampusHub API
+  version: 1.0.0
+  description: Canonical HTTP API contract for the CampusHub backend foundation.
+servers:
+  - url: /api/v1
+paths:
+  /auth/register:
+    post:
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: Registered user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+        '409':
+          $ref: '#/components/responses/Error'
+  /auth/login:
+    post:
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated user and token pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+        '401':
+          $ref: '#/components/responses/Error'
+components:
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [email, password, nickname]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, minLength: 8, maxLength: 72}
+        nickname: {type: string, minLength: 1, maxLength: 50}
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string}
+    Response:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {type: integer, format: int32}
+        message: {type: string}
+        data: {nullable: true}
+        trace_id: {type: string}
+    Error:
+      description: Standard error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Response'

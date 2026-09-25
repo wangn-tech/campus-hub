@@ -1,0 +1,34 @@
+app:
+  name: campushub
+  env: test
+  timezone: UTC
+  instance_id: test
+http:
+  host: 127.0.0.1
+  port: 18081
+mysql:
+  host: 127.0.0.1
+  port: 13306
+  username: campushub
+  password: change-me
+  database: campushub_test
+redis:
+  host: 127.0.0.1
+  port: 16379
+  password: campushub_dev
+kafka:
+  brokers:
+    - 127.0.0.1:19092
+  consumer_group: campushub-test
+  chat_delivery_group_prefix: campushub.chat-delivery-test
+elasticsearch:
+  addresses:
+    - http://127.0.0.1:19200
+storage:
+  driver: local
+  bucket: campushub-test
+  use_path_style: true
+jwt:
+  issuer: campushub-test
+  access_secret: test-access-secret
+  refresh_secret: test-refresh-secret

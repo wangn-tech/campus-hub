@@ -1,0 +1,179 @@
+name: campushub
+
+services:
+  mysql:
+    image: mysql:8.4.6
+    environment:
+      MYSQL_ROOT_PASSWORD: ${CAMPUSHUB_MYSQL_ROOT_PASSWORD:?set CAMPUSHUB_MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${CAMPUSHUB_MYSQL_DATABASE:-campushub}
+      MYSQL_USER: ${CAMPUSHUB_MYSQL_USERNAME:-campushub}
+      MYSQL_PASSWORD: ${CAMPUSHUB_MYSQL_PASSWORD:?set CAMPUSHUB_MYSQL_PASSWORD}
+    ports:
+      - "13306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command: ["mysqld", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 768m
+
+  redis:
+    image: redis:7.4.2
+    environment:
+      REDIS_PASSWORD: ${CAMPUSHUB_REDIS_PASSWORD:?set CAMPUSHUB_REDIS_PASSWORD}
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${CAMPUSHUB_REDIS_PASSWORD:?set CAMPUSHUB_REDIS_PASSWORD}"]
+    ports:
+      - "16379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$${REDIS_PASSWORD} redis-cli ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 256m
+
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:19092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+    ports:
+      - "19092:19092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+    mem_limit: 768m
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.1.4
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "19200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+    mem_limit: 1g
+
+  minio:
+    profiles: [storage]
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    environment:
+      MINIO_ROOT_USER: ${CAMPUSHUB_MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${CAMPUSHUB_MINIO_ROOT_PASSWORD:?set CAMPUSHUB_MINIO_ROOT_PASSWORD}
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "19000:9000"
+      - "19001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live >/dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+    mem_limit: 512m
+
+  kafka-ui:
+    profiles: [tools]
+    image: provectuslabs/kafka-ui:v0.7.2
+    environment:
+      KAFKA_CLUSTERS_0_NAME: campushub
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "18090:8080"
+    depends_on:
+      kafka: {condition: service_healthy}
+    mem_limit: 256m
+
+  kibana:
+    profiles: [tools]
+    image: docker.elastic.co/kibana/kibana:9.1.4
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "15601:5601"
+    depends_on:
+      elasticsearch: {condition: service_healthy}
+    mem_limit: 512m
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v2.55.1
+    ports:
+      - "19090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+    mem_limit: 256m
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:11.2.2
+    ports:
+      - "13000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus: {condition: service_started}
+    mem_limit: 256m
+
+  app:
+    profiles: [app]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    environment:
+      CAMPUSHUB_CONFIG_FILE: /app/configs/config.prod.yaml.example
+      CAMPUSHUB_APP_ENV: prod
+      CAMPUSHUB_MYSQL_HOST: mysql
+      CAMPUSHUB_MYSQL_PORT: 3306
+      CAMPUSHUB_MYSQL_USERNAME: ${CAMPUSHUB_MYSQL_USERNAME:-campushub}
+      CAMPUSHUB_MYSQL_PASSWORD: ${CAMPUSHUB_MYSQL_PASSWORD:?set CAMPUSHUB_MYSQL_PASSWORD}
+      CAMPUSHUB_MYSQL_DATABASE: ${CAMPUSHUB_MYSQL_DATABASE:-campushub}
+      CAMPUSHUB_REDIS_HOST: redis
+      CAMPUSHUB_REDIS_PORT: 6379
+      CAMPUSHUB_REDIS_PASSWORD: ${CAMPUSHUB_REDIS_PASSWORD:?set CAMPUSHUB_REDIS_PASSWORD}
+      CAMPUSHUB_KAFKA_BROKERS: kafka:9092
+      CAMPUSHUB_ELASTICSEARCH_ADDRESSES: http://elasticsearch:9200
+      CAMPUSHUB_JWT_ACCESS_SECRET: ${CAMPUSHUB_JWT_ACCESS_SECRET:?set CAMPUSHUB_JWT_ACCESS_SECRET}
+      CAMPUSHUB_JWT_REFRESH_SECRET: ${CAMPUSHUB_JWT_REFRESH_SECRET:?set CAMPUSHUB_JWT_REFRESH_SECRET}
+    ports:
+      - "18080:8080"
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      elasticsearch: {condition: service_healthy}
+volumes:
+  mysql-data:
+  redis-data:
+  kafka-data:
+  elasticsearch-data:
+  minio-data:
+  prometheus-data:
+  grafana-data:
